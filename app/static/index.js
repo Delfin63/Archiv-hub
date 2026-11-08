@@ -43,17 +43,111 @@ function zeigeQuelle(art) {
     "kachel" + (art === "upload" ? " gewaehlt" : "");
   document.getElementById("kachel-scan").className =
     "kachel" + (art === "scan" ? " gewaehlt" : "");
+  // Die Statusabfrage läuft nur, solange der Scan-Bereich offen ist.
+  if (art !== "scan") stoppeScannerPruefung();
 }
 
 document.getElementById("kachel-scan").addEventListener("click", function () {
   zeigeQuelle("scan");
+  pruefeScanner();
 });
 document.getElementById("kachel-upload").addEventListener("click", function () {
   zeigeQuelle("upload");
 });
+
+document.getElementById("pruef-zeigen").addEventListener("click", function () {
+  var l = document.getElementById("pruef-liste");
+  var b = document.getElementById("pruef-zeigen");
+  l.hidden = !l.hidden;
+  b.textContent = l.hidden ? "Anzeigen" : "Ausblenden";
+});
+
+// --- Direktscan über eSCL ---------------------------------------------------
+
+var scannerBereit = false;
+var scannerTimer = null;
+
+function pruefeScanner() {
+  var el = document.getElementById("scanner-status");
+  el.textContent = "Prüfe Scanner …";
+  api("/api/scanner/status", "GET")
+    .then(function (d) {
+      if (!d.konfiguriert) {
+        scannerBereit = false;
+        el.textContent =
+          "Kein Scanner eingerichtet. Nutze die Anleitung unten für " +
+          "„Digitale Bilder“.";
+        document.getElementById("scan-start").disabled = true;
+        stoppeScannerPruefung();
+        return;
+      }
+      scannerBereit = d.bereit;
+      el.textContent = d.bereit
+        ? d.name + " ist bereit."
+        : d.name + ": " + d.zustand + " – bitte warten …";
+      document.getElementById("scan-start").disabled = !d.bereit;
+
+      // Solange der Scanner arbeitet, weiter nachfragen: nach einem Scan
+      // meldet das Gerät rund eine Minute "Processing", bevor es frei wird.
+      if (d.bereit) {
+        stoppeScannerPruefung();
+      } else {
+        starteScannerPruefung();
+      }
+    })
+    .catch(function (err) {
+      scannerBereit = false;
+      el.textContent = "Scanner nicht erreichbar: " + err.message;
+      document.getElementById("scan-start").disabled = true;
+      starteScannerPruefung();
+    });
+}
+
+function starteScannerPruefung() {
+  if (scannerTimer) return;
+  scannerTimer = window.setInterval(function () {
+    // Nur nachfragen, solange der Scan-Bereich sichtbar ist.
+    if (document.getElementById("scan-bereich").hidden) {
+      stoppeScannerPruefung();
+      return;
+    }
+    pruefeScanner();
+  }, 5000);
+}
+
+function stoppeScannerPruefung() {
+  if (scannerTimer) {
+    window.clearInterval(scannerTimer);
+    scannerTimer = null;
+  }
+}
+
 document.getElementById("scan-skript-zeigen").addEventListener("click", function () {
   var h = document.getElementById("scan-hilfe");
   h.hidden = !h.hidden;
+});
+
+document.getElementById("scan-start").addEventListener("click", function () {
+  if (!scannerBereit) return;
+  var btn = document.getElementById("scan-start");
+  btn.disabled = true;
+  zeigeErgebnis("Scanne … das kann bis zu einer Minute dauern.", false);
+
+  api("/api/scanner/scan", "POST", {
+    quelle: document.getElementById("scan-quelle").value,
+    aufloesung: parseInt(document.getElementById("scan-aufloesung").value, 10),
+    farbmodus: document.getElementById("scan-farbe").value,
+    duplex: document.getElementById("scan-duplex").checked
+  })
+    .then(function (d) {
+      zeigeErgebnis(
+        "Gescannt: " + d.name + " (" + groesse(d.groesse) +
+        "). Jetzt »Wählen« antippen.", false
+      );
+      loadKorb();
+    })
+    .catch(function (err) { zeigeErgebnis(err.message, true); })
+    .then(function () { pruefeScanner(); });
 });
 
 function loadKorb() {

@@ -107,3 +107,39 @@ def get_llm_model():
         "DEEPSEEK_MODEL",
         _llm.get("model", "deepseek-v4-pro"),
     )
+
+
+def scanner_url():
+    """Basis-URL des Netzwerk-Scanners (eSCL/AirScan).
+
+    Im Container ist Bonjour nicht verfügbar, deshalb wird die IP-Adresse
+    gebraucht: ARCHIV_HUB_SCANNER_URL=http://192.168.68.61
+    """
+    return os.environ.get("ARCHIV_HUB_SCANNER_URL") or ""
+
+
+def scanner_name():
+    """Anzeigename des Scanners."""
+    return os.environ.get("ARCHIV_HUB_SCANNER_NAME") or "Scanner"
+
+
+# ---- Zeit -------------------------------------------------------------------
+#
+# Im Container läuft die Uhr in UTC. Für Dateinamen, Log-Einträge und
+# Datumsangaben gilt aber die lokale Zeit (Europe/Zurich), sonst weichen sie
+# im Winter um eine, im Sommer um zwei Stunden ab.
+try:
+    from zoneinfo import ZoneInfo
+
+    LOKALE_ZEITZONE = ZoneInfo("Europe/Zurich")
+except Exception:  # noqa: BLE001 - fehlende Zeitzonendaten
+    LOKALE_ZEITZONE = None
+
+
+def jetzt():
+    """Aktuelle Zeit in der lokalen Zeitzone."""
+    from datetime import datetime as _dt
+
+    if LOKALE_ZEITZONE is not None:
+        return _dt.now(LOKALE_ZEITZONE)
+    return _dt.now()

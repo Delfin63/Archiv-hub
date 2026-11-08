@@ -1652,3 +1652,157 @@ def test_vorschlag_liefert_dateiname_und_pfad(tmp_path, monkeypatch):
         assert "dateiname" in body["vorschlag"]
         assert "pfad" in body["vorschlag"]
         assert "speicherort" in body["vorschlag"]
+
+
+# ---------------------------------------------------------------------------
+# Direktscan über eSCL (ohne echtes Gerät: XML und Validierung)
+# ---------------------------------------------------------------------------
+
+
+def test_escl_xml_flachbett():
+    from app import scanner_escl as es
+
+    xml = es._scan_einstellungen("flachbett", 300, "farbe")
+    assert "<scan:InputSource>Platen</scan:InputSource>" in xml
+    assert "<scan:XResolution>300</scan:XResolution>" in xml
+    assert "<scan:ColorMode>RGB24</scan:ColorMode>" in xml
+    assert "application/pdf" in xml
+
+
+def test_escl_xml_einzug_duplex():
+    from app import scanner_escl as es
+
+    xml = es._scan_einstellungen("einzug", 200, "grau", duplex=True)
+    assert "<scan:InputSource>AdfDuplex</scan:InputSource>" in xml
+    assert "Grayscale8" in xml
+    assert "200" in xml
+
+
+def test_escl_xml_sw_modus():
+    from app import scanner_escl as es
+
+    xml = es._scan_einstellungen("flachbett", 600, "sw")
+    assert "BlackAndWhite1" in xml
+    assert "600" in xml
+
+
+def test_escl_lehnt_unbekannte_werte_ab():
+    from app import scanner_escl as es
+
+    for args in (
+        ("gibtsnicht", 300, "farbe"),
+        ("flachbett", 999, "farbe"),
+        ("flachbett", 300, "gibtsnicht"),
+    ):
+        with pytest.raises(es.ScannerFehler):
+            es._scan_einstellungen(*args)
+
+
+def test_escl_braucht_url():
+    from app import scanner_escl as es
+
+    with pytest.raises(es.ScannerFehler):
+        es.status("")
+    with pytest.raises(es.ScannerFehler):
+        es.status("   ")
+
+
+def test_escl_basis_url_ergaenzt_schema():
+    from app import scanner_escl as es
+
+    assert es._basis_url("192.168.1.5") == "http://192.168.1.5"
+    assert es._basis_url("http://192.168.1.5/") == "http://192.168.1.5"
+
+
+def test_scanner_status_ohne_konfiguration(tmp_path, monkeypatch):
+    """Ohne ARCHIV_HUB_SCANNER_URL meldet der Hub: nicht eingerichtet."""
+    import app.app as appmod
+
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "")
+    r = client.get("/api/scanner/status").get_json()
+    assert r["konfiguriert"] is False
+    assert r["bereit"] is False
+
+
+def test_scanner_scan_ohne_konfiguration(tmp_path, monkeypatch):
+    import app.app as appmod
+
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "")
+    r = client.post("/api/scanner/scan", json={"quelle": "flachbett"})
+    assert r.status_code == 400
+
+
+def test_scanner_scan_legt_datei_im_korb(tmp_path, monkeypatch):
+    """Ein erfolgreicher Scan landet als PDF im Eingangskorb."""
+    import app.app as appmod
+    from app import scanner_escl as es
+
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "http://test")
+
+    def fake_scan(url, quelle, aufloesung, farbmodus, duplex, format_):
+        return b"%PDF-1.4 gescannt", "application/pdf"
+
+    monkeypatch.setattr(es, "scanne", fake_scan)
+
+    r = client.post(
+        "/api/scanner/scan",
+        json={"quelle": "flachbett", "aufloesung": 300, "farbmodus": "farbe"},
+    )
+    body = r.get_json()
+    assert r.status_code == 200, body
+    assert body["name"].startswith("Scan_")
+    assert body["name"].endswith(".pdf")
+    assert (korb / body["name"]).read_bytes().startswith(b"%PDF")
+
+
+def test_scanner_scan_meldet_geraetefehler(tmp_path, monkeypatch):
+    import app.app as appmod
+    from app import scanner_escl as es
+
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "http://test")
+
+    def fake_scan(*a, **k):
+        raise es.ScannerFehler("Gerät beschäftigt")
+
+    monkeypatch.setattr(es, "scanne", fake_scan)
+    r = client.post("/api/scanner/scan", json={})
+    assert r.status_code == 502
+    assert "beschäftigt" in r.get_json()["error"]
+
+
+# ---------------------------------------------------------------------------
+# Zeitzone: Datumsangaben müssen lokale Zeit sein, nicht UTC
+# ---------------------------------------------------------------------------
+
+
+def test_config_liefert_lokale_zeit():
+    """Im Container läuft die Uhr in UTC – config.jetzt() muss das ausgleichen."""
+    import app.config as config
+
+    jetzt = config.jetzt()
+    assert jetzt.tzinfo is not None, "jetzt() muss zeitzonenbewusst sein"
+    # Europe/Zurich liegt im Winter bei +01:00, im Sommer bei +02:00.
+    offset = jetzt.utcoffset()
+    assert offset is not None
+    assert offset.total_seconds() in (3600, 7200), f"Unerwarteter Offset: {offset}"
+
+
+def test_scan_dateiname_nutzt_lokale_zeit(tmp_path, monkeypatch):
+    """Der Zeitstempel im Scan-Dateinamen kommt aus config.jetzt()."""
+    import app.app as appmod
+    from app import scanner_escl as es
+
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "http://test")
+    monkeypatch.setattr(
+        es, "scanne", lambda *a, **k: (b"%PDF-1.4 x", "application/pdf")
+    )
+
+    r = client.post("/api/scanner/scan", json={})
+    name = r.get_json()["name"]
+    erwartet = appmod.config.jetzt().strftime("%Y-%m-%d_%H")
+    assert erwartet in name, f"Lokale Zeit fehlt im Namen: {name}"

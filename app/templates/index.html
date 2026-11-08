@@ -34,25 +34,62 @@
   </div>
 
   <div id="scan-bereich" hidden>
-    <p class="klein">
-      „Digitale Bilder" öffnet sich und der Eingangskorb wird angezeigt.
-      Scanne dort – die Datei erscheint danach hier.
-    </p>
-    <div class="zeile">
-      <button type="button" class="btn btn-secondary" id="korb-finder">
-        Eingangskorb im Finder öffnen
-      </button>
-      <button type="button" class="btn btn-secondary" id="scan-skript-zeigen">
-        Wie öffne ich „Digitale Bilder"?
-      </button>
+    <div id="scanner-status" class="klein"></div>
+
+    <div id="scan-einstellungen">
+      <div class="scan-grid">
+        <label>Auflösung
+          <select id="scan-aufloesung">
+            <option value="200">200 dpi</option>
+            <option value="300" selected>300 dpi</option>
+            <option value="600">600 dpi</option>
+          </select>
+        </label>
+
+        <label>Vorlage
+          <select id="scan-quelle">
+            <option value="flachbett" selected>Flachbett (einzelne Seite)</option>
+            <option value="einzug">Einzug</option>
+          </select>
+        </label>
+
+        <label>Farbe
+          <select id="scan-farbe">
+            <option value="farbe" selected>Farbe</option>
+            <option value="grau">Graustufen</option>
+            <option value="sw">Schwarzweiss</option>
+          </select>
+        </label>
+
+        <label class="scan-duplex">
+          <input type="checkbox" id="scan-duplex"> Beidseitig (nur Einzug)
+        </label>
+      </div>
+
+      <div class="zeile">
+        <button type="button" class="btn btn-primary" id="scan-start">Scannen</button>
+        <button type="button" class="btn btn-still btn-klein" id="scan-skript-zeigen">
+          Anleitung „Digitale Bilder"
+        </button>
+      </div>
     </div>
+
     <div id="scan-hilfe" hidden class="hilfe">
-      <p class="klein">Doppelklicke im Ordner <code>6-archiv-hub</code>:</p>
+      <p class="klein">
+        Falls der Direktscan nicht geht: in „Digitale Bilder" (macOS) scannen.
+        Im Ordner <code>6-archiv-hub</code> doppelklicken:
+      </p>
       <p class="skript-name">68-archiv-hub-scannen.command</p>
       <p class="klein">
         Einstellungen dort: 300 dpi, A4, PDF, OCR aus.
         „Scannen in" einmalig auf den Eingangskorb stellen.
       </p>
+    </div>
+
+    <div class="zeile">
+      <button type="button" class="btn btn-secondary btn-klein" id="korb-finder">
+        Eingangskorb im Finder öffnen
+      </button>
     </div>
   </div>
 
@@ -64,6 +101,15 @@
       <button type="button" class="btn btn-secondary btn-klein" id="korb-neu">Aktualisieren</button>
     </div>
     <ul class="korb-liste" id="korb-liste"></ul>
+
+    <div class="pruef-zeile" id="zur-pruefung">
+      <span class="klein">Zur Prüfung</span>
+      <span class="count-badge" id="pruef-count">0</span>
+      <button type="button" class="btn btn-still btn-klein" id="pruef-zeigen">
+        Anzeigen
+      </button>
+    </div>
+    <ul class="pruef-liste" id="pruef-liste" hidden></ul>
   </div>
 </section>
 
@@ -102,18 +148,6 @@
 </section>
 
 <div class="msg" id="ergebnis"></div>
-
-<details class="card kompakt" id="zur-pruefung">
-  <summary>
-    Zur Prüfung <span class="count-badge" id="pruef-count">0</span>
-  </summary>
-  <p class="klein hint">Dokumente, bei denen die Zuordnung unsicher war.</p>
-  <ul class="pruef-liste" id="pruef-liste"></ul>
-</details>
-
-<p class="klein fussnote">
-  <a href="/einstellungen/ziele">Ablageorte verwalten</a>
-</p>
 {% endblock %}
 
 {% block scripts %}

@@ -24,7 +24,7 @@ from pathlib import Path
 from flask import Flask, jsonify, redirect, render_template, request, session
 from werkzeug.security import check_password_hash
 
-from . import classifier, config, ocr, pipeline, scanner, storage
+from . import classifier, config, ocr, pipeline, scanner, scanner_escl, storage
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("ARCHIV_HUB_SECRET_KEY") or secrets.token_hex(32)
@@ -214,6 +214,103 @@ def api_speicherorte():
 @app.route("/api/scanner")
 def api_scanner():
     return jsonify({"ok": True, "scanner": [q.to_dict() for q in scanner.load_scanner()]})
+
+
+@app.route("/api/scanner/status")
+def api_scanner_status():
+    """Zustand des Netzwerk-Scanners (eSCL)."""
+    url = config.scanner_url()
+    if not url:
+        return jsonify(
+            {
+                "ok": True,
+                "konfiguriert": False,
+                "name": "Scanner",
+                "bereit": False,
+                "zustand": "nicht eingerichtet",
+            }
+        )
+    try:
+        zustand = scanner_escl.status(url)
+    except scanner_escl.ScannerFehler as exc:
+        return jsonify(
+            {
+                "ok": True,
+                "konfiguriert": True,
+                "name": config.scanner_name(),
+                "bereit": False,
+                "zustand": str(exc),
+            }
+        )
+    return jsonify(
+        {
+            "ok": True,
+            "konfiguriert": True,
+            "name": config.scanner_name(),
+            "bereit": zustand["bereit"],
+            "zustand": zustand["zustand"],
+        }
+    )
+
+
+@app.route("/api/scanner/scan", methods=["POST"])
+def api_scanner_scan():
+    """Scannt direkt über eSCL und legt das Ergebnis in den Eingangskorb."""
+    url = config.scanner_url()
+    if not url:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Kein Scanner eingerichtet. ARCHIV_HUB_SCANNER_URL setzen.",
+                }
+            ),
+            400,
+        )
+
+    data = request.get_json(silent=True) or {}
+    quelle = str(data.get("quelle") or "flachbett").strip()
+    farbmodus = str(data.get("farbmodus") or "farbe").strip()
+    duplex = bool(data.get("duplex"))
+    try:
+        aufloesung = int(data.get("aufloesung") or 300)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Ungültige Auflösung."}), 400
+
+    try:
+        daten, _typ = scanner_escl.scanne(
+            url,
+            quelle=quelle,
+            aufloesung=aufloesung,
+            farbmodus=farbmodus,
+            duplex=duplex,
+            format_="pdf",
+        )
+    except scanner_escl.ScannerFehler as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+    korb = config.INPUT_DIR
+    korb.mkdir(parents=True, exist_ok=True)
+
+    # Sprechender Name: Scan_<Datum>_<Zeit>.pdf, ohne zu überschreiben.
+    stempel = config.jetzt().strftime("%Y-%m-%d_%H-%M-%S")
+    name = f"Scan_{stempel}.pdf"
+    ziel = korb / name
+    zaehler = 2
+    while ziel.exists():
+        ziel = korb / f"Scan_{stempel} ({zaehler}).pdf"
+        zaehler += 1
+
+    ziel.write_bytes(daten)
+    return jsonify(
+        {
+            "ok": True,
+            "name": ziel.name,
+            "groesse": len(daten),
+            "aufloesung": aufloesung,
+            "quelle": quelle,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +560,7 @@ def api_korb_ablegen(name):
             dateiname = pipeline.safe_filename(dateiname_vorgabe)
         else:
             stamm = Path(quelle.name).stem
-            datum = datetime.now().strftime("%Y-%m-%d")
+            datum = config.jetzt().strftime("%Y-%m-%d")
             dateiname = pipeline.safe_filename(f"{datum} – {stamm}.pdf")
         ziel = pipeline.unique_destination(ziel_ordner, dateiname)
         shutil.move(str(searchable_pdf), str(ziel))
@@ -476,7 +573,7 @@ def api_korb_ablegen(name):
     pipeline.append_log(
         LOG_PATH,
         {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "timestamp": config.jetzt().isoformat(timespec="seconds"),
             "original_filename": quelle.name,
             "status": "abgelegt",
             "ziel": str(ziel),
@@ -689,7 +786,7 @@ def _verarbeite_datei(staged, original_name, ziel_id_vorgabe=None):
                 )
             result = {
                 "ziel_id": ziel_id_vorgabe,
-                "datum": datetime.now().strftime("%Y-%m-%d"),
+                "datum": config.jetzt().strftime("%Y-%m-%d"),
                 "absender": None,
                 "dokumenttyp": None,
                 "sicherheit": None,
@@ -704,7 +801,7 @@ def _verarbeite_datei(staged, original_name, ziel_id_vorgabe=None):
                 error = f"Klassifizierung fehlgeschlagen: {exc}"
 
         entry = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "timestamp": config.jetzt().isoformat(timespec="seconds"),
             "original_filename": original_name,
             "status": "zur_pruefung",
             "ziel": None,

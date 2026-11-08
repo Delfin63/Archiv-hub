@@ -5,3 +5,4 @@ openai==1.82.0
 Pillow==12.3.0
 ocrmypdf==17.13.0
 pypdf==5.9.0
+tzdata==2025.2

@@ -158,9 +158,10 @@ def _korb_eintrag(path):
         "name": path.name,
         "endung": path.suffix.lower(),
         "groesse": stat.st_size,
-        "geaendert": datetime.fromtimestamp(stat.st_mtime).isoformat(
-            timespec="seconds"
-        ),
+        # Lokale Zeit: im Container liefe fromtimestamp() sonst auf UTC.
+        "geaendert": datetime.fromtimestamp(
+            stat.st_mtime, config.LOKALE_ZEITZONE
+        ).isoformat(timespec="seconds"),
     }
 
 

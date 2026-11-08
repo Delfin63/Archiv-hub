@@ -21,6 +21,10 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
+      # Netzwerk-Scanner (eSCL/AirScan). Im Container ist Bonjour nicht
+      # verfügbar, deshalb die IP-Adresse. Leer = kein Direktscan.
+      ARCHIV_HUB_SCANNER_URL: ${ARCHIV_HUB_SCANNER_URL:-}
+      ARCHIV_HUB_SCANNER_NAME: ${ARCHIV_HUB_SCANNER_NAME:-}
     volumes:
       - ./data:/app/data
       # Speicherort "standard": HOST-Pfad (konfigurierbar) -> Container

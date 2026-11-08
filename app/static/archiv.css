@@ -1160,3 +1160,82 @@ a.btn {
     grid-template-columns: 1fr;
   }
 }
+
+/* Kopf: Logo als Startlink, Einstellungen und Abmelden rechts */
+.icon-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  padding: 8px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.icon-link:hover {
+  color: var(--navy);
+  background: var(--navy-soft);
+}
+
+.main-nav {
+  margin-left: auto;
+}
+
+/* "Zur Prüfung" als schmale Zeile unter dem Korb */
+.pruef-zeile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.pruef-zeile .btn-klein {
+  margin-left: auto;
+}
+
+.pruef-liste {
+  margin-top: 8px;
+}
+
+/* Scan-Einstellungen */
+.scan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.scan-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.scan-grid select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  color: var(--ink);
+}
+
+.scan-duplex {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  grid-column: 1 / -1;
+}
+
+#scanner-status {
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  .scan-grid {
+    grid-template-columns: 1fr;
+  }
+}
