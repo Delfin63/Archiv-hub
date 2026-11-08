@@ -1,0 +1,10 @@
+# Optionale Gruppierung der Hubs. Die eigentlichen Ablage-Ziele liegen in
+# data/ziele.json (Laufzeitdaten). Hier steht nur Name + Beschreibung für die
+# Oberfläche. Die Beschreibungen werden vom Nutzer gepflegt (vorerst "TODO").
+hubs:
+  - name: translation-hub
+    description: "TODO – vom Nutzer auszufüllen"
+  - name: guitar-hub
+    description: "TODO – vom Nutzer auszufüllen"
+  - name: healing-hub
+    description: "TODO – vom Nutzer auszufüllen"

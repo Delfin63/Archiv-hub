@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}Archiv Hub{% endblock %}</title>
+  <meta name="theme-color" content="#0B345C">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-180.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='archiv.css') }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  {% if session.get('authenticated') %}
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="{{ url_for('index') }}">
+        <img src="{{ url_for('static', filename='archive-hub-logo.png') }}" alt="Archiv Hub">
+      </a>
+      <nav class="main-nav" id="main-nav">
+        <a href="{{ url_for('index') }}" class="{{ 'active' if active == 'index' }}">Start</a>
+        <a href="{{ url_for('scan_page') }}" class="{{ 'active' if active == 'scan' }}">Scannen</a>
+        <a href="{{ url_for('ziele_page') }}" class="{{ 'active' if active == 'ziele' }}">Ziele</a>
+        <a href="/#zur-pruefung">Zur Prüfung</a>
+        <button type="button" class="btn btn-logout" onclick="archivLogout()">Abmelden</button>
+      </nav>
+    </div>
+  </header>
+  {% endif %}
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">Archiv Hub · Version {{ app_version }}</div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='archiv.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

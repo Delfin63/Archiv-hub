@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Ziele · Archiv Hub{% endblock %}
+
+{% block content %}
+<div id="hinweis"></div>
+<div class="msg" id="status"></div>
+
+<section class="card">
+  <h2>Speicherorte</h2>
+  <ul class="speicherorte-liste" id="speicherorte-liste"></ul>
+  <p class="klein">Neue Speicherorte werden mit dem Skript 66-archiv-hub-speicherort-hinzufuegen.command hinzugefügt.</p>
+</section>
+
+<section class="card">
+  <h2>Ziele <span class="count-badge" id="ziele-count">0</span></h2>
+  <div class="ziel-liste" id="ziele-liste"></div>
+</section>
+
+<section class="card">
+  <h2 id="form-titel">Ziel anlegen</h2>
+  <form id="ziel-form">
+    <input type="hidden" id="ziel-id">
+    <label>Name <input type="text" id="name" required></label>
+    <label>Speicherort <select id="speicherort"></select></label>
+
+    <div class="navigator">
+      <div class="brotkrumen" id="brotkrumen"></div>
+      <ul class="ordner-liste" id="ordner-liste"></ul>
+      <div class="navigator-aktionen">
+        <button type="button" class="btn btn-secondary" onclick="ebeneHoeher()">Eine Ebene höher</button>
+        <button type="button" class="btn btn-primary" onclick="ordnerWaehlen()">Diesen Ordner wählen</button>
+      </div>
+      <div class="toolbar">
+        <input type="text" id="neuer-ordner" placeholder="Neuer Ordner hier (Name)">
+        <button type="button" class="btn btn-secondary" onclick="neuerOrdner()">Anlegen</button>
+      </div>
+      <div class="host-pfad" id="host-pfad"></div>
+    </div>
+
+    <label>Hub (optional) <select id="hub"></select></label>
+    <label>Beschreibung (für die KI) <textarea id="beschreibung" rows="2"></textarea></label>
+    <label><input type="checkbox" id="jahresordner"> Jahresordner</label>
+    <label><input type="checkbox" id="aktiv" checked> Aktiv</label>
+    <div class="form-actions">
+      <button type="button" class="btn btn-primary" onclick="saveZiel()">Speichern</button>
+      <button type="button" class="btn btn-secondary" onclick="resetForm()">Zurücksetzen</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='ziele.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Anmeldung · Archiv Hub{% endblock %}
+
+{% block content %}
+<div class="login-card">
+  <img class="login-logo" src="{{ url_for('static', filename='archive-hub-logo.png') }}" alt="Archiv Hub">
+  <h1>Anmelden</h1>
+  <p class="login-hint">Bitte gib dein Passwort ein, um den Archiv Hub zu öffnen.</p>
+  <div class="msg error" id="msg"></div>
+  <form class="login-form" method="post" action="{{ url_for('login') }}" autocomplete="off">
+    <label for="password">Passwort</label>
+    <input type="password" id="password" name="password" autofocus required autocomplete="off">
+    <button type="submit" class="btn btn-primary">Anmelden</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='login.js') }}"></script>
+{% endblock %}

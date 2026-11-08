@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Laufzeitdaten (persistent, nicht versionieren)
+data/
+documents/
+
+# Maschinenspezifische Speicherorte (per Skript 66/67 erzeugt)
+compose.speicherorte.yaml
+
+# Umgebung (API-Schlüssel, Passwort-Hash)
+.env
+
+# Backups
+*.bak
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Logs
+*.log

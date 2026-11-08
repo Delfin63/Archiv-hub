@@ -1,0 +1,27 @@
+services:
+  archiv-hub:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: archiv-hub
+    ports:
+      - "${ARCHIV_HUB_PORT:-8002}:8000"
+    environment:
+      ARCHIV_HUB_SECRET_KEY: ${ARCHIV_HUB_SECRET_KEY:-}
+      ARCHIV_HUB_PASSWORD_HASH: ${ARCHIV_HUB_PASSWORD_HASH:-}
+      ARCHIV_HUB_COOKIE_SECURE: ${ARCHIV_HUB_COOKIE_SECURE:-0}
+      ARCHIV_HUB_STANDARD_HOST_PFAD: ${ARCHIV_HUB_ABLAGE_BASIS:-./data/ablage}
+      # Absoluter Pfad nur zur Anzeige (wird vom Startskript 60 bzw.
+      # deploy-synology.sh aufgelöst, bevor compose läuft). Der Mount oben
+      # bleibt unverändert.
+      ARCHIV_HUB_ABLAGE_BASIS_ANZEIGE: ${ARCHIV_HUB_ABLAGE_BASIS_ANZEIGE:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
+    volumes:
+      - ./data:/app/data
+      # Speicherort "standard": HOST-Pfad (konfigurierbar) -> Container
+      # /ablage/standard. Weitere Speicherorte kommen aus
+      # compose.speicherorte.yaml (pro Maschine, nicht eingecheckt).
+      - ${ARCHIV_HUB_ABLAGE_BASIS:-./data/ablage}:/ablage/standard
+    restart: unless-stopped

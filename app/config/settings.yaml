@@ -1,0 +1,14 @@
+# Einstellungen der Archiv-Hub-Pipeline.
+llm:
+  provider: deepseek
+  model: deepseek-v4-pro
+  base_url: https://api.deepseek.com
+
+# Schwelle (0-1) für die Sicherheit der automatischen Zuordnung.
+# Liegt "sicherheit" darunter (oder fehlen Pflichtangaben), landet das
+# Dokument in data/zur-pruefung/.
+confidence_threshold: 0.7
+
+# Eingangsordner im Container. Hochgeladene Dateien werden hier kurz
+# zwischengelagert, bevor sie verarbeitet werden.
+input_dir: /app/data/input

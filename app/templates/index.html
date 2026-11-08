@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Archiv Hub{% endblock %}
+
+{% block content %}
+<section class="card" id="upload">
+  <h2>Dokument hochladen</h2>
+  <form id="upload-form">
+    <label for="datei">PDF oder Bild</label>
+    <input type="file" id="datei" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" required>
+    <button type="submit" class="btn btn-primary">Hochladen</button>
+  </form>
+  <div class="msg" id="ergebnis"></div>
+</section>
+
+<section class="card" id="zur-pruefung">
+  <h2>Zur Prüfung <span class="count-badge" id="pruef-count">0</span></h2>
+  <ul class="pruef-liste" id="pruef-liste"></ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='index.js') }}"></script>
+{% endblock %}

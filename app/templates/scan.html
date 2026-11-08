@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Scannen · Archiv Hub{% endblock %}
+
+{% block content %}
+<section class="card" id="scanner">
+  <h2>Scanner</h2>
+  <label for="scanner-wahl">Quelle</label>
+  <select id="scanner-wahl"></select>
+</section>
+
+<section class="card" id="scan-bereich">
+  <h2 id="scan-titel">Handy-Kamera / Fotos</h2>
+
+  <div class="scan-einstellungen">
+    <label>Quelle
+      <select id="scan-quelle">
+        <option value="flachbett" selected>Flachbett</option>
+        <option value="einzug">Dokumenteneinzug (ADF)</option>
+      </select>
+    </label>
+    <label>Auflösung
+      <select id="scan-aufloesung">
+        <option value="200">200 DPI</option>
+        <option value="300" selected>300 DPI</option>
+        <option value="600">600 DPI</option>
+      </select>
+    </label>
+    <label>Grösse
+      <select id="scan-groesse">
+        <option value="A4" selected>A4</option>
+        <option value="A3">A3</option>
+        <option value="A5">A5</option>
+        <option value="Letter">Letter</option>
+        <option value="Legal">Legal</option>
+      </select>
+    </label>
+    <label>Format
+      <select id="scan-format">
+        <option value="PDF" selected>PDF</option>
+        <option value="JPEG">JPEG</option>
+        <option value="PNG">PNG</option>
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" id="scan-duplex"> Duplex</label>
+    <label class="check"><input type="checkbox" id="scan-ocr" checked> OCR</label>
+  </div>
+
+  <div id="scan-inhalt"></div>
+  <div id="scan-vorschau" class="scan-vorschau"></div>
+
+  <button type="button" class="btn btn-primary" id="scan-btn">Scan</button>
+  <div class="msg" id="ergebnis"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='scan.js') }}"></script>
+{% endblock %}
