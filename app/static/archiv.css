@@ -79,12 +79,26 @@ body {
 .header-inner {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
+  column-gap: 16px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+/* Logo und Navigation erhalten dieselbe Breite. Dadurch sitzt die
+   Schrittleiste dazwischen wirklich in der Mitte, unabhängig davon, wie
+   breit die Knöpfe rechts sind. */
+.header-inner .brand,
+.header-inner .main-nav {
+  flex: 0 0 var(--kopf-seite, 150px);
+}
+
+.header-inner .brand {
   justify-content: flex-start;
-  flex-wrap: wrap;
-  column-gap: 32px;
-  row-gap: 12px;
-  padding-top: 14px;
-  padding-bottom: 14px;
+}
+
+.header-inner .main-nav {
+  justify-content: flex-end;
 }
 
 .brand {
@@ -1020,18 +1034,23 @@ a.btn {
    Neue Startseite: Schrittleiste, Kacheln, kompakte Bereiche
    --------------------------------------------------------------------------- */
 
+/* Schrittleiste: sitzt im Kopf zwischen Logo und Einstellungen, mittig
+   ausgerichtet. Der Kopf bleibt beim Scrollen sichtbar. */
 .schrittleiste {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   justify-content: center;
-  margin: 0 0 18px;
-  font-size: 0.9rem;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .sl-punkt {
   color: var(--muted);
-  padding: 4px 10px;
+  padding: 3px 8px;
   border-radius: 999px;
 }
 
@@ -1148,7 +1167,6 @@ a.btn {
 /* Schmale Inhaltsfläche: auf grossen Bildschirmen nicht zu breit */
 .schritt,
 .msg,
-.schrittleiste,
 .fussnote {
   max-width: 720px;
   margin-left: auto;
@@ -1176,9 +1194,6 @@ a.btn {
   background: var(--navy-soft);
 }
 
-.main-nav {
-  margin-left: auto;
-}
 
 /* "Zur Prüfung" als schmale Zeile unter dem Korb */
 .pruef-zeile {
@@ -1237,5 +1252,114 @@ a.btn {
 @media (max-width: 560px) {
   .scan-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Ordnername als Freitextfeld mit Vorschlaegen */
+.ablage-wahl input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  margin-bottom: 4px;
+}
+
+.ablage-wahl .klein {
+  margin: 0 0 10px;
+}
+
+@media (max-width: 860px) {
+  .schrittleiste {
+    font-size: 0.78rem;
+    gap: 4px;
+    padding: 0 6px;
+  }
+  .sl-sep {
+    display: none;
+  }
+}
+
+/* Zusammenfassung vor dem Ablegen */
+.zusammenfassung {
+  background: var(--navy-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 12px 0;
+  word-break: break-all;
+}
+
+.zusammenfassung .klein {
+  margin-top: 4px;
+}
+
+/* Ordnerpfad des Eingangskorbs: sichtbar und markierbar zum Kopieren.
+   (Ein Finder-Link ist nicht möglich: Browser blockieren file:// aus
+   einer Webseite heraus.) */
+.korb-pfad {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  word-break: break-all;
+  cursor: text;
+  user-select: all;
+}
+
+/* Unterbereiche innerhalb von Schritt 1 (Einstellungen, Datei, Korb) */
+.unterbereich {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.unterbereich h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: var(--navy);
+}
+
+.unterbereich h3 .schritt-nr {
+  width: 22px;
+  height: 22px;
+  font-size: 0.78rem;
+}
+
+/* Der Korb als Unterbereich braucht keinen zweiten Rahmen */
+.korb.unterbereich {
+  border-top: 1px solid var(--border);
+}
+
+/* Knöpfe erledigter Schritte: sichtbar, aber nicht klickbar. Sie werden
+   erst wieder aktiv, wenn man mit "Zurück" in den Schritt zurückkehrt. */
+.btn-erledigt,
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+:root {
+  --kopf-seite: 150px;
+}
+
+@media (max-width: 900px) {
+  .header-inner {
+    flex-wrap: wrap;
+  }
+  .header-inner .brand,
+  .header-inner .main-nav {
+    flex: 0 0 auto;
+  }
+  .schrittleiste {
+    order: 3;
+    flex: 1 1 100%;
   }
 }

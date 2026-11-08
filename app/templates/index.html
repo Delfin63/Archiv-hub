@@ -1,17 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Archiv Hub{% endblock %}
 
-{% block content %}
-<nav class="schrittleiste" id="schrittleiste">
-  <span class="sl-punkt aktiv" data-schritt="1">1. Quelle</span>
-  <span class="sl-sep">›</span>
-  <span class="sl-punkt" data-schritt="2">2. Vorschlag</span>
-  <span class="sl-sep">›</span>
-  <span class="sl-punkt" data-schritt="3">3. Ablegen</span>
-</nav>
+{# Schrittleiste im Kopf: bleibt beim Scrollen sichtbar. #}
+{% block schrittleiste %}
+<nav class="schrittleiste" id="schrittleiste" aria-label="Ablauf"></nav>
+{% endblock %}
 
+{% block content %}
 <section class="schritt" id="schritt-1">
-  <h2>Wie möchtest du ein Dokument hinzufügen?</h2>
+  <h2><span class="schritt-nr">1</span> Wie möchtest du ein Dokument hinzufügen?</h2>
 
   <div class="wege">
     <button type="button" class="kachel" id="kachel-scan">
@@ -25,7 +22,8 @@
     </button>
   </div>
 
-  <div id="upload-bereich" hidden>
+  <div id="upload-bereich" hidden class="unterbereich">
+    <h3><span class="schritt-nr" id="nr-upload">2</span> Datei hochladen</h3>
     <form id="upload-form" class="zeile">
       <input type="file" id="datei"
              accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" required>
@@ -33,11 +31,12 @@
     </form>
   </div>
 
-  <div id="scan-bereich" hidden>
+  <div id="scan-bereich" hidden class="unterbereich">
+    <h3><span class="schritt-nr" id="nr-scan">2</span> Einstellungen</h3>
     <div id="scanner-status" class="klein"></div>
 
     <div id="scan-einstellungen">
-      <div class="scan-grid">
+      <div class="scan-grid" id="scan-grid">
         <label>Auflösung
           <select id="scan-aufloesung">
             <option value="200">200 dpi</option>
@@ -61,45 +60,61 @@
           </select>
         </label>
 
+        <label>Format
+          <select id="scan-format">
+            <option value="pdf" selected>PDF (durchsuchbar)</option>
+            <option value="jpeg">JPEG (Bild)</option>
+            <option value="png">PNG (Bild)</option>
+          </select>
+        </label>
+
         <label class="scan-duplex">
           <input type="checkbox" id="scan-duplex"> Beidseitig (nur Einzug)
         </label>
       </div>
 
       <div class="zeile">
-        <button type="button" class="btn btn-primary" id="scan-start">Scannen</button>
-        <button type="button" class="btn btn-still btn-klein" id="scan-skript-zeigen">
-          Anleitung „Digitale Bilder"
+        <button type="button" class="btn btn-primary" id="scan-weiter">Weiter</button>
+        <button type="button" class="btn btn-still" id="scan-zurueck-1">
+          Zurück zur Quelle
         </button>
       </div>
     </div>
 
-    <div id="scan-hilfe" hidden class="hilfe">
-      <p class="klein">
-        Falls der Direktscan nicht geht: in „Digitale Bilder" (macOS) scannen.
-        Im Ordner <code>6-archiv-hub</code> doppelklicken:
-      </p>
-      <p class="skript-name">68-archiv-hub-scannen.command</p>
-      <p class="klein">
-        Einstellungen dort: 300 dpi, A4, PDF, OCR aus.
-        „Scannen in" einmalig auf den Eingangskorb stellen.
-      </p>
+    <div id="scan-ausfuehren" hidden class="unterbereich">
+      <h3><span class="schritt-nr">3</span> Scannen</h3>
+      <p class="klein" id="scan-zusammenfassung"></p>
+      <div class="zeile">
+        <button type="button" class="btn btn-primary" id="scan-start">Scannen</button>
+        <button type="button" class="btn btn-still" id="scan-zurueck-2">
+          Zurück
+        </button>
+        <button type="button" class="btn btn-still" id="scan-skript-zeigen">
+          Anleitung „Digitale Bilder"
+        </button>
+      </div>
+      <div id="scan-hilfe" hidden class="hilfe">
+        <p class="klein">
+          Falls der Direktscan nicht geht: in „Digitale Bilder" (macOS) scannen.
+          Im Ordner <code>6-archiv-hub</code> doppelklicken:
+        </p>
+        <p class="skript-name">68-archiv-hub-scannen.command</p>
+        <p class="klein">
+          Einstellungen dort: 300 dpi, A4, PDF, OCR aus.
+          „Scannen in" einmalig auf den Eingangskorb stellen.
+        </p>
+      </div>
     </div>
 
-    <div class="zeile">
-      <button type="button" class="btn btn-secondary btn-klein" id="korb-finder">
-        Eingangskorb im Finder öffnen
-      </button>
-    </div>
   </div>
-
-  <div class="korb kompakt">
+  <div class="korb kompakt unterbereich" id="korb-bereich" hidden>
     <div class="korb-kopf">
       <strong>Eingangskorb</strong>
       <span class="count-badge" id="korb-count">0</span>
       <span class="klein" id="korb-hinweis">Keine offenen Dokumente</span>
       <button type="button" class="btn btn-secondary btn-klein" id="korb-neu">Aktualisieren</button>
     </div>
+    <p class="korb-pfad klein" id="korb-pfad" title="Zum Kopieren markieren"></p>
     <ul class="korb-liste" id="korb-liste"></ul>
 
     <div class="pruef-zeile" id="zur-pruefung">
@@ -114,24 +129,21 @@
 </section>
 
 <section class="schritt" id="schritt-2" hidden>
-  <h2><span class="schritt-nr">2</span> Vorschlag prüfen</h2>
+  <h2><span class="schritt-nr" id="nr-ziel">4</span> Ziel wählen</h2>
   <p class="klein" id="gewaehlte-datei"></p>
 
   <div id="vorschlag-bereich"></div>
 
   <div class="ablage-wahl">
     <label for="wahl-ordner">Ordner</label>
-    <select id="wahl-ordner"></select>
-
-    <div class="neuer-ordner-zeile">
-      <input type="text" id="neuer-ordner" placeholder="Neuen Ordner anlegen …">
-      <button type="button" class="btn btn-secondary btn-klein" onclick="neuenOrdnerAnlegen()">
-        Anlegen
-      </button>
-    </div>
+    <input type="text" id="wahl-ordner" list="ordner-vorschlaege"
+           autocomplete="off" placeholder="z. B. Rechnungen">
+    <datalist id="ordner-vorschlaege"></datalist>
+    <p class="klein" id="ordner-hinweis"></p>
 
     <label for="wahl-dateiname">Dateiname</label>
     <input type="text" id="wahl-dateiname" autocomplete="off">
+    <p class="klein" id="datum-hinweis"></p>
 
     <div class="host-pfad" id="wahl-pfad"></div>
 
@@ -142,8 +154,24 @@
   </div>
 
   <div class="zeile">
+    <button type="button" class="btn btn-primary" id="btn-weiter">Weiter</button>
+    <button type="button" class="btn btn-still" id="btn-zurueck-4">Zurück</button>
+  </div>
+</section>
+
+<section class="schritt" id="schritt-3" hidden>
+  <h2><span class="schritt-nr" id="nr-ausfuehren">5</span> Ausführen und ablegen</h2>
+
+  <div class="zusammenfassung" id="zusammenfassung"></div>
+
+  <p class="klein">
+    Die Datei wird in den oben genannten Ordner gelegt. Ist er noch nicht
+    vorhanden, wird er angelegt.
+  </p>
+
+  <div class="zeile">
     <button type="button" class="btn btn-primary" id="btn-ablegen">Ablegen</button>
-    <button type="button" class="btn btn-still" id="btn-abbrechen">Abbrechen</button>
+    <button type="button" class="btn btn-still" id="btn-zurueck">Zurück</button>
   </div>
 </section>
 

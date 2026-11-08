@@ -14,25 +14,44 @@ from . import config
 
 MAX_TEXT_CHARS = 4000
 
-SYSTEM_PROMPT = """Du ordnest Dokumente automatisch einem Ziel zu.
+SYSTEM_PROMPT = """Du ordnest Dokumente für ein Archiv vor.
 
-Du erhältst einen Dokumenttext und eine Liste der aktiven Ziele. Wähle das
-Ziel, das am besten passt. Passt kein Ziel, antworte mit ziel_id "unklar".
+Du erhältst einen Dokumenttext und eine Liste der bereits vorhandenen Ordner.
+Schlage den passenden Ordner vor.
+
+Wähle einen vorhandenen Ordner, wenn er inhaltlich passt, und gib seine id an.
+Passt kein vorhandener Ordner, schlage einen NEUEN Ordnernamen vor: kurz,
+deutsch, ohne Datum. Umlaute (ä, ö, ü) und ß sind ausdrücklich erlaubt und
+erwünscht – schreibe sie so, wie sie im Dokument stehen, nicht als ae/oe/ue.
+Beispiele: "Rechnungen", "Arztberichte", "Übungsanleitungen", "Prämien".
 
 Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Objekt. Keine Einleitung,
 keine Markdown-Codeblöcke, keine Kommentare, keine Rückfragen.
 
 Das JSON-Objekt muss genau diese Felder enthalten:
 
-- "ziel_id": die id eines Ziels aus der Liste (exakt) oder "unklar"
-- "datum": das Dokumentdatum im Format YYYY-MM-DD
-- "absender": Absender/Aussteller des Dokuments
+- "ziel_id": id eines vorhandenen Ordners (exakt) oder "neu" bei neuem Vorschlag
+- "ordner": Name des vorgeschlagenen Ordners (bei vorhandenem Ordner: sein Name)
+- "datum": das DOKUMENTDATUM im Format YYYY-MM-DD. Verwende das Datum, das im
+  Dokument steht (z. B. Rechnungsdatum, Briefdatum, Ausstellungsdatum) – NICHT
+  das heutige Datum. Nur wenn im Dokument kein Datum vorkommt, lass das Feld
+  leer ("").
+- "dokumentname": der KURZE, INHALTLICHE Name des Dokuments – worum es konkret
+  geht, nicht die Gattung. Beispiele: "Ischias", "Muster AG", "Steuererklärung
+  2025", "Bandscheibenvorfall". NICHT "Übungsanleitung" oder "Rechnung" (das
+  wäre der Typ). Umlaute sind erlaubt. Höchstens 40 Zeichen, ohne Datum.
+- "absender": Absender/Aussteller des Dokuments (Firmenname, Praxis, Behörde)
 - "dokumenttyp": der Dokumenttyp (z. B. Rechnung, Vertrag, Arztbrief)
 - "sicherheit": eine Zahl zwischen 0 und 1 für deine Zuordnungssicherheit
 
-Beispiel:
-{"ziel_id": "abc123", "datum": "2026-11-07",
- "absender": "Musterpraxis", "dokumenttyp": "Rechnung", "sicherheit": 0.92}"""
+Beispiele:
+{"ziel_id": "abc123", "ordner": "Rechnungen", "datum": "2026-11-07",
+ "dokumentname": "Muster AG Serverwartung",
+ "absender": "Musterpraxis", "dokumenttyp": "Rechnung", "sicherheit": 0.92}
+
+{"ziel_id": "neu", "ordner": "Uebungsanleitungen", "datum": "",
+ "dokumentname": "Ischias", "absender": "", "dokumenttyp": "Uebungsanleitung",
+ "sicherheit": 0.9}"""
 
 
 def _chat(messages, temperature=0.1, max_tokens=1000):
@@ -74,20 +93,37 @@ def _extract_json(text):
     return json.loads(text[start : end + 1])
 
 
-def _build_messages(text, ziele):
-    ziel_lines = "\n".join(
-        "- id=%s | name=%s | beschreibung=%s | hub=%s"
-        % (
-            ziel.get("id"),
-            ziel.get("name") or "",
-            ziel.get("beschreibung") or "",
-            ziel.get("hub") or "",
+def _build_messages(text, ziele, ordner=None):
+    """Baut die LLM-Nachrichten.
+
+    ``ziele``: vorhandene Ablageziele (id, name, beschreibung).
+    ``ordner``: zusätzliche Ordnernamen im Archiv, die noch kein Ziel sind.
+    """
+    zeilen = []
+    for ziel in ziele:
+        zeilen.append(
+            "- id=%s | name=%s | beschreibung=%s"
+            % (
+                ziel.get("id"),
+                ziel.get("name") or "",
+                ziel.get("beschreibung") or "",
+            )
         )
-        for ziel in ziele
-    )
+    if not zeilen:
+        zeilen.append("(noch keine Ordner vorhanden – schlage einen neuen vor)")
+
+    vorhandene = ""
+    if ordner:
+        vorhandene = (
+            "\n\nWeitere Ordner, die im Archiv bereits existieren "
+            "(ohne eigene Beschreibung):\n"
+            + "\n".join("- " + str(o) for o in ordner)
+        )
+
     user = (
-        "Verfügbare Ziele:\n"
-        + ziel_lines
+        "Vorhandene Ordner:\n"
+        + "\n".join(zeilen)
+        + vorhandene
         + "\n\nDokumenttext:\n"
         + text
     )
@@ -97,15 +133,14 @@ def _build_messages(text, ziele):
     ]
 
 
-def classify(text, ziele):
-    """Klassifiziert einen Dokumenttext und liefert ein dict mit den Feldern
-    ziel_id, datum, absender, dokumenttyp, sicherheit.
+def classify(text, ziele, ordner=None):
+    """Klassifiziert einen Dokumenttext.
 
-    Bei ungültigem JSON wird genau einmal erneut versucht. Schlägt auch der
-    zweite Versuch fehl, wird ValueError geworfen.
+    Liefert ein dict mit ziel_id, ordner, datum, absender, dokumenttyp,
+    sicherheit. Bei ungültigem JSON wird genau einmal erneut versucht.
     """
     text = (text or "").strip()[:MAX_TEXT_CHARS]
-    messages = _build_messages(text, ziele)
+    messages = _build_messages(text, ziele, ordner)
 
     raw = _chat(messages)
     try:

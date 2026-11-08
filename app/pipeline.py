@@ -11,7 +11,9 @@ from pathlib import Path
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-REQUIRED_FIELDS = ("ziel_id", "datum", "absender", "dokumenttyp")
+# Pflichtfelder: eine Zuordnung braucht einen Ordner und einen Dokumenttyp.
+# Das Datum ist NICHT Pflicht – Dokumente ohne Datum bekommen das Scandatum.
+REQUIRED_FIELDS = ("dokumenttyp",)
 
 
 def is_valid_date(value):
@@ -44,38 +46,86 @@ def is_valid_sicherheit(result):
 
 
 def should_review(result, threshold):
-    """True, wenn das Dokument nicht automatisch abgelegt werden darf."""
+    """True, wenn das Dokument nicht automatisch abgelegt werden darf.
+
+    "ziel_id" wird hier nicht mehr geprüft: Der Aufrufer entscheidet, ob ein
+    vorhandener Ordner gewählt wurde (ziel_id = id) oder ein neuer angelegt
+    werden soll (ziel_id = "neu" mit dem Namen in "ordner").
+    """
     if missing_required(result):
         return True
-    if str(result.get("ziel_id") or "").strip() == "unklar":
-        return True
-    if not is_valid_date(result.get("datum")):
+    # Ein Datum ist nur dann ein Fehler, wenn es vorhanden, aber ungültig ist.
+    if str(result.get("datum") or "").strip() and not is_valid_date(result.get("datum")):
         return True
     if not is_valid_sicherheit(result):
         return True
     return float(result["sicherheit"]) < threshold
 
 
-def output_filename(result, original_name=None):
-    """Baut "YYYY-MM-DD – Absender – Dokumenttyp.pdf".
+def output_filename(
+    result,
+    original_name=None,
+    fallback_datum=None,
+    ordner=None,
+):
+    """Baut "Datum – Ordnername – Dokumentname.pdf".
 
-    Sind Absender und Dokumenttyp leer (z. B. wenn der Ablageort manuell
-    gewählt wurde und keine KI beteiligt war), wird der Originaldateiname
-    verwendet, damit kein Name wie "2026-11-08 –  – .pdf" entsteht.
+    Das Datum ist das DOKUMENTDATUM (Rechnungsdatum, Briefdatum). Fehlt es im
+    Dokument, wird ``fallback_datum`` verwendet (üblicherweise das Scandatum).
+
+    Leere Teile werden weggelassen – es entstehen keine Lücken und kein
+    Platzhalter wie "Unbekannt".
     """
-    datum = str(result["datum"]).strip()
-    absender = str(result.get("absender") or "").strip()
-    dokumenttyp = str(result.get("dokumenttyp") or "").strip()
+    result = result or {}
+    datum = str(result.get("datum") or "").strip() or str(fallback_datum or "").strip()
+    ordner = str(ordner or "").strip()
+    name = str(result.get("dokumentname") or "").strip()
+    typ = str(result.get("dokumenttyp") or "").strip()
 
-    if not absender and not dokumenttyp:
+    # Ohne inhaltlichen Namen hilft der Dokumenttyp als Rückfall.
+    if not name:
+        name = typ
+
+    if not name and not ordner:
+        # Nichts Brauchbares von der KI: Originalname behalten.
         if original_name:
-            stem = Path(str(original_name)).stem.strip()
-            if stem:
-                return f"{datum} – {stem}.pdf"
-        return f"{datum}.pdf"
+            stamm = Path(str(original_name)).stem.strip()
+            if stamm:
+                if datum and not re.search(r"\d{4}-\d{2}-\d{2}", stamm):
+                    return f"{datum} – {stamm}.pdf"
+                return f"{stamm}.pdf"
+        return f"{datum}.pdf" if datum else "Dokument.pdf"
 
-    teile = [datum, absender or "Unbekannt", dokumenttyp or "Dokument"]
+    # Ordnername und Dokumentname nicht doppelt nennen: sind sie gleich,
+    # wird der Name nur einmal aufgeführt.
+    teile = []
+    if datum:
+        teile.append(datum)
+    if _gleich(ordner, name):
+        if name:
+            teile.append(name)
+    else:
+        if ordner:
+            teile.append(ordner)
+        if name:
+            teile.append(name)
+    if not teile:
+        teile.append(name or ordner or "Dokument")
+
     return " – ".join(teile) + ".pdf"
+
+
+def _gleich(a, b):
+    """Vergleicht zwei Namen ohne Rücksicht auf Gross-/Kleinschreibung und
+    deutsche Umlaute (Uebungsanleitungen == Übungsanleitungen)."""
+    def norm(x):
+        x = str(x or "").strip().lower()
+        for von, zu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss"),
+                        ("_", ""), ("-", ""), (" ", "")):
+            x = x.replace(von, zu)
+        return x
+
+    return norm(a) == norm(b)
 
 
 def unique_destination(directory, filename):
@@ -108,11 +158,12 @@ def append_log(log_path, entry):
 _UNSAFE_NAME_CHARS = '<>:"/\\|?*\x00-\x1f'
 
 
-def safe_filename(name, fallback="Dokument.pdf"):
+def safe_filename(name, fallback="Dokument.pdf", endung=".pdf"):
     """Bereinigt einen vom Nutzer vorgegebenen Dateinamen.
 
-    Entfernt Pfadtrenner und Steuerzeichen, kürzt auf 200 Zeichen und sorgt
-    für die Endung .pdf. Ein leeres Ergebnis fällt auf ``fallback`` zurück.
+    Entfernt Pfadtrenner und Steuerzeichen, kürzt auf 200 Zeichen und setzt
+    die gewünschte ``endung`` (Standard .pdf). Ein leeres Ergebnis fällt auf
+    ``fallback`` zurück.
     """
     name = str(name or "").strip()
     # Nur den reinen Dateinamen behalten (keine Pfadanteile).
@@ -121,7 +172,30 @@ def safe_filename(name, fallback="Dokument.pdf"):
     name = name.strip(" .")
     if not name:
         return fallback
-    if not name.lower().endswith(".pdf"):
+    endung = str(endung or ".pdf")
+    if not endung.startswith("."):
+        endung = "." + endung
+    if not name.lower().endswith(endung.lower()):
         # Vorhandene Endung ersetzen, sonst anhängen.
-        name = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", name) + ".pdf"
+        name = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", name) + endung
     return name[:200]
+
+
+def safe_ordnername(name, fallback="Sonstiges"):
+    """Bereinigt einen von der KI vorgeschlagenen Ordnernamen.
+
+    Erlaubt sind Buchstaben, Ziffern, Leerzeichen, Punkt, Komma, Bindestrich
+    und Unterstrich. Pfadtrenner und Sonderzeichen fliegen raus, damit der
+    Name keinen Pfad bilden kann.
+    """
+    name = str(name or "").strip()
+    name = name.replace("\\", "/").split("/")[-1]
+    name = re.sub(r'[<>:"|?*\x00-\x1f]', "", name)
+    # Mehrfache Leerzeichen zusammenfassen, Ränder entfernen.
+    name = re.sub(r"\s+", " ", name).strip(" .-")
+    # Eine allfällige Dateiendung abschneiden.
+    if name.lower().endswith(".pdf"):
+        name = name[:-4].strip(" .-")
+    if not name or name in (".", ".."):
+        return fallback
+    return name[:100]

@@ -16,6 +16,8 @@
       <a class="brand" href="{{ url_for('index') }}" title="Startseite">
         <img src="{{ url_for('static', filename='archive-hub-logo.png') }}" alt="Archiv Hub">
       </a>
+      {# Schrittleiste mittig zwischen Logo und Einstellungen. #}
+      {% block schrittleiste %}{% endblock %}
       <nav class="main-nav" id="main-nav">
         <a class="icon-link" href="/einstellungen/ziele" title="Ablageorte verwalten"
            aria-label="Ablageorte verwalten">

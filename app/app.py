@@ -253,6 +253,18 @@ def api_scanner_status():
     )
 
 
+def _jpeg_zu_png(daten):
+    """Wandelt JPEG-Bytes in PNG-Bytes (der Scanner kann kein PNG)."""
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(daten)) as bild:
+        ausgabe = io.BytesIO()
+        bild.save(ausgabe, format="PNG")
+        return ausgabe.getvalue()
+
+
 @app.route("/api/scanner/scan", methods=["POST"])
 def api_scanner_scan():
     """Scannt direkt über eSCL und legt das Ergebnis in den Eingangskorb."""
@@ -272,10 +284,17 @@ def api_scanner_scan():
     quelle = str(data.get("quelle") or "flachbett").strip()
     farbmodus = str(data.get("farbmodus") or "farbe").strip()
     duplex = bool(data.get("duplex"))
+    # Der Scanner liefert PDF oder JPEG. PNG erzeugt der Hub daraus.
+    ausgabeformat = str(data.get("format") or "pdf").strip().lower()
+    if ausgabeformat not in ("pdf", "jpeg", "png"):
+        return jsonify({"ok": False, "error": "Unbekanntes Format."}), 400
     try:
         aufloesung = int(data.get("aufloesung") or 300)
     except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "Ungültige Auflösung."}), 400
+
+    # Der Scanner kennt nur PDF und JPEG – PNG wird danach umgewandelt.
+    scanner_format = "jpeg" if ausgabeformat in ("jpeg", "png") else "pdf"
 
     try:
         daten, _typ = scanner_escl.scanne(
@@ -284,21 +303,32 @@ def api_scanner_scan():
             aufloesung=aufloesung,
             farbmodus=farbmodus,
             duplex=duplex,
-            format_="pdf",
+            format_=scanner_format,
         )
     except scanner_escl.ScannerFehler as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
+    endung = {"pdf": ".pdf", "jpeg": ".jpg", "png": ".png"}[ausgabeformat]
+
+    if ausgabeformat == "png":
+        try:
+            daten = _jpeg_zu_png(daten)
+        except Exception as exc:  # noqa: BLE001
+            return (
+                jsonify({"ok": False, "error": f"PNG-Umwandlung fehlgeschlagen: {exc}"}),
+                500,
+            )
+
     korb = config.INPUT_DIR
     korb.mkdir(parents=True, exist_ok=True)
 
-    # Sprechender Name: Scan_<Datum>_<Zeit>.pdf, ohne zu überschreiben.
+    # Sprechender Name: Scan_<Datum>_<Zeit>.<endung>, ohne zu überschreiben.
     stempel = config.jetzt().strftime("%Y-%m-%d_%H-%M-%S")
-    name = f"Scan_{stempel}.pdf"
+    name = f"Scan_{stempel}{endung}"
     ziel = korb / name
     zaehler = 2
     while ziel.exists():
-        ziel = korb / f"Scan_{stempel} ({zaehler}).pdf"
+        ziel = korb / f"Scan_{stempel} ({zaehler}){endung}"
         zaehler += 1
 
     ziel.write_bytes(daten)
@@ -483,11 +513,18 @@ def api_ablage_ordner():
 def api_ablage_ordner_liste():
     """Alle Ordner aller Speicherorte - für die Auswahl auf der Startseite.
 
-    Liefert je Speicherort die Ordner der obersten Ebene. Damit lässt sich ein
-    Ablageort ohne Umweg über eine Verwaltungsseite wählen.
+    Liefert je Speicherort die Ordner der obersten Ebene. Der eingebaute
+    Test-Speicherort "standard" wird ausgelassen, sobald ein echter
+    Speicherort eingerichtet ist - er liegt im Projektordner und ist nicht
+    als Ablage für echte Dokumente gedacht.
     """
+    orte = storage.locations()
+    echte = [o for o in orte if o.get("name") != storage.DEFAULT_SPEICHERORT]
+    if echte:
+        orte = echte
+
     ergebnis = []
-    for loc in storage.locations():
+    for loc in orte:
         name = loc.get("name")
         try:
             ordner, _mehr = storage.list_folders(name, "")
@@ -543,27 +580,58 @@ def api_korb_ablegen(name):
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 
+    # Fehlt der Ordner noch, wird er angelegt: der Vorschlag der KI darf
+    # einen neuen Ordnernamen enthalten, der erst jetzt entsteht.
+    if pfad and not ziel_ordner.is_dir():
+        try:
+            storage.safe_ablage_path(speicherort, str(Path(pfad).parent))
+            ziel_ordner.mkdir(parents=True, exist_ok=True)
+        except (ValueError, OSError) as exc:
+            return (
+                jsonify({"ok": False, "error": f"Ordner konnte nicht angelegt werden: {exc}"}),
+                400,
+            )
+
+    # Bilder bleiben Bilder: nur PDF wird durchsuchbar gemacht. Sonst würde
+    # ein bewusst als JPEG/PNG abgelegter Scan stillschweigend zum PDF.
+    quelle_endung = Path(quelle.name).suffix.lower()
+    ist_bild = quelle_endung in (".jpg", ".jpeg", ".png", ".tif", ".tiff",
+                                 ".bmp", ".webp")
+    endung = quelle_endung if ist_bild else ".pdf"
+    if endung == ".jpeg":
+        endung = ".jpg"
+
     work_dir = DATA_DIR / "work" / secrets.token_hex(8)
     work_dir.mkdir(parents=True, exist_ok=True)
     try:
-        try:
-            searchable_pdf, _text = ocr.process(quelle, work_dir)
-        except Exception as exc:  # noqa: BLE001
-            return (
-                jsonify({"ok": False, "error": f"Texterkennung fehlgeschlagen: {exc}"}),
-                500,
-            )
+        if ist_bild:
+            # Kein OCR-Zwang: Original kopieren, Text nur zur Information lesen.
+            ablage_datei = quelle
+            try:
+                _pdf, _text = ocr.process(quelle, work_dir)
+            except Exception:  # noqa: BLE001
+                pass  # ohne Texterkennung trotzdem ablegen
+        else:
+            try:
+                ablage_datei, _text = ocr.process(quelle, work_dir)
+            except Exception as exc:  # noqa: BLE001
+                return (
+                    jsonify(
+                        {"ok": False, "error": f"Texterkennung fehlgeschlagen: {exc}"}
+                    ),
+                    500,
+                )
 
         ziel_ordner.mkdir(parents=True, exist_ok=True)
         # Dateiname: Vorgabe des Nutzers (oder der KI), sonst Datum + Name.
         if dateiname_vorgabe:
-            dateiname = pipeline.safe_filename(dateiname_vorgabe)
+            dateiname = pipeline.safe_filename(dateiname_vorgabe, endung=endung)
         else:
             stamm = Path(quelle.name).stem
             datum = config.jetzt().strftime("%Y-%m-%d")
-            dateiname = pipeline.safe_filename(f"{datum} – {stamm}.pdf")
+            dateiname = pipeline.safe_filename(f"{datum} – {stamm}", endung=endung)
         ziel = pipeline.unique_destination(ziel_ordner, dateiname)
-        shutil.move(str(searchable_pdf), str(ziel))
+        shutil.copyfile(str(ablage_datei), str(ziel))
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -647,23 +715,27 @@ def upload():
 
 @app.route("/api/korb/<path:name>/vorschlag", methods=["POST"])
 def api_korb_vorschlag(name):
-    """Analysiert eine Korb-Datei und schlägt einen Ablageort vor.
+    """Analysiert eine Korb-Datei und schlägt Ordner und Dateinamen vor.
 
-    Legt NICHTS ab: führt nur OCR und Klassifizierung aus und liefert das
-    Ergebnis zurück, damit der Nutzer es prüfen und bestätigen kann.
+    Legt NICHTS ab. Die KI darf einen vorhandenen Ordner wählen oder einen
+    neuen Namen vorschlagen. Beides ist nur ein Vorschlag – der Nutzer
+    bestätigt oder ändert ihn.
     """
     quelle = storage.korb_datei(name)
     if quelle is None:
         return jsonify({"ok": False, "error": "Datei nicht gefunden."}), 404
 
     ziele = storage.active_targets()
-    if not ziele:
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Keine aktiven Ziele angelegt. Bitte zuerst ein Ziel anlegen.",
-            }
-        ), 400
+
+    # Zusätzliche Ordnernamen im Archiv, die (noch) kein Ziel sind.
+    vorhandene = []
+    for loc in storage.locations():
+        try:
+            ordner, _mehr = storage.list_folders(loc.get("name"), "")
+        except (ValueError, OSError):
+            ordner = []
+        vorhandene.extend(ordner)
+    vorhandene = sorted(set(vorhandene))
 
     work_dir = DATA_DIR / "work" / secrets.token_hex(8)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -677,7 +749,7 @@ def api_korb_vorschlag(name):
             )
 
         try:
-            result = classifier.classify(text, ziele)
+            result = classifier.classify(text, ziele, vorhandene) or {}
         except Exception as exc:  # noqa: BLE001
             return (
                 jsonify(
@@ -688,39 +760,54 @@ def api_korb_vorschlag(name):
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
-    ziel_id = (result or {}).get("ziel_id")
-    ziel = storage.find_active_target(ziel_id)
+    # Vorhandener Ordner getroffen?
+    ziel = storage.find_active_target(result.get("ziel_id"))
+    ordner_name = str(result.get("ordner") or "").strip()
+    if ziel is not None:
+        ordner_name = str(ziel.get("name") or ordner_name).strip()
+    elif not ordner_name:
+        # Kein brauchbarer Name von der KI: aus dem Dokumenttyp ableiten.
+        ordner_name = str(result.get("dokumenttyp") or "").strip() or "Sonstiges"
+
+    # Ordnernamen für die Verzeichnisbildung entschärfen.
+    ordner_name = pipeline.safe_ordnername(ordner_name)
+
     unsicher = pipeline.should_review(result, config.CONFIDENCE_THRESHOLD)
 
-    vorschlag = None
-    if ziel is not None and not unsicher:
-        try:
-            ordner = storage.ziel_directory(ziel, result.get("datum"))
-        except ValueError:
-            ziel = None
+    # Scandatum als Rückfall, wenn das Dokument kein Datum enthält.
+    fallback = config.jetzt().strftime("%Y-%m-%d")
+    dateiname = pipeline.output_filename(
+        result, quelle.name, fallback_datum=fallback, ordner=ordner_name
+    )
 
-    if ziel is not None and not unsicher:
-        vorschlag = {
-            "ziel_id": ziel.get("id"),
-            "ziel_name": ziel.get("name"),
-            "speicherort": ziel.get("speicherort"),
-            # Relativer Pfad innerhalb des Speicherorts (für die Auswahlliste).
-            "pfad": str(ziel.get("pfad") or ""),
-            "ordner": str(ordner),
-            "dateiname": pipeline.output_filename(result, quelle.name),
-            "absender": result.get("absender"),
-            "dokumenttyp": result.get("dokumenttyp"),
-            "datum": result.get("datum"),
-            "sicherheit": result.get("sicherheit"),
-        }
+    # Speicherort: bevorzugt der des getroffenen Ziels, sonst der erste
+    # eingerichtete Speicherort.
+    orte = storage.locations()
+    speicherort = None
+    if ziel is not None:
+        speicherort = ziel.get("speicherort")
+    if not speicherort and orte:
+        echte = [o for o in orte if o.get("name") != storage.DEFAULT_SPEICHERORT]
+        speicherort = (echte[0] if echte else orte[0]).get("name")
 
     return jsonify(
         {
             "ok": True,
-            "vorschlag": vorschlag,
+            "vorschlag": {
+                "ziel_id": (ziel or {}).get("id"),
+                "ordner": ordner_name,
+                "ordner_vorhanden": ziel is not None,
+                "speicherort": speicherort,
+                "dateiname": dateiname,
+                "datum": result.get("datum") or "",
+                "datum_aus_dokument": bool(str(result.get("datum") or "").strip()),
+                "absender": result.get("absender"),
+                "dokumentname": result.get("dokumentname") or "",
+                "dokumenttyp": result.get("dokumenttyp"),
+                "sicherheit": result.get("sicherheit"),
+            },
             "unsicher": bool(unsicher),
-            "ziel_id": ziel_id,
-            "sicherheit": (result or {}).get("sicherheit"),
+            "vorhandene_ordner": vorhandene,
         }
     )
 
@@ -842,7 +929,9 @@ def _verarbeite_datei(staged, original_name, ziel_id_vorgabe=None):
         else:
             directory = storage.ziel_directory(ziel, result.get("datum"))
             directory.mkdir(parents=True, exist_ok=True)
-            filename = pipeline.output_filename(result, original_name)
+            filename = pipeline.output_filename(
+                result, original_name, ordner=ziel.get("name")
+            )
             destination = pipeline.unique_destination(directory, filename)
             shutil.move(str(searchable_pdf), str(destination))
             entry.update(_classification_fields(result))

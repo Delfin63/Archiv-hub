@@ -101,15 +101,17 @@ def test_should_review_missing_fields():
     assert pipeline.should_review({}, 0.7) is True
 
 
-def test_should_review_unklar():
+def test_should_review_neuer_ordner_ist_ok():
+    """Die KI darf einen neuen Ordner vorschlagen (ziel_id "neu")."""
     result = {
-        "ziel_id": "unklar",
-        "datum": "2026-11-07",
-        "absender": "A",
-        "dokumenttyp": "B",
+        "ziel_id": "neu",
+        "ordner": "Uebungsanleitungen",
+        "datum": "",
+        "absender": "",
+        "dokumenttyp": "Uebungsanleitung",
         "sicherheit": 0.9,
     }
-    assert pipeline.should_review(result, 0.7) is True
+    assert pipeline.should_review(result, 0.7) is False
 
 
 def test_should_review_low_confidence():
@@ -146,8 +148,10 @@ def test_should_review_invalid_date():
 
 
 def test_output_filename():
-    result = {"datum": "2026-11-07", "absender": "Arzt", "dokumenttyp": "Rechnung"}
-    assert pipeline.output_filename(result) == "2026-11-07 – Arzt – Rechnung.pdf"
+    """Format: Datum – Ordnername – Dokumentname.pdf"""
+    result = {"datum": "2026-11-07", "dokumentname": "Rechnung", "dokumenttyp": "Rechnung"}
+    name = pipeline.output_filename(result, ordner="Rechnungen")
+    assert name == "2026-11-07 – Rechnungen – Rechnung.pdf"
 
 
 def test_unique_destination_appends_counter(tmp_path):
@@ -342,6 +346,7 @@ def test_upload_files_confident_document(tmp_path, monkeypatch):
     result = {
         "ziel_id": "z1",
         "datum": "2026-11-07",
+        "dokumentname": "Serverwartung",
         "absender": "Musterpraxis",
         "dokumenttyp": "Rechnung",
         "sicherheit": 0.95,
@@ -355,7 +360,7 @@ def test_upload_files_confident_document(tmp_path, monkeypatch):
     payload = response.get_json()
     assert payload["status"] == "abgelegt"
 
-    expected = ablage_dir / "standard" / "healing" / "2026-11-07 – Musterpraxis – Rechnung.pdf"
+    expected = ablage_dir / "standard" / "healing" / "2026-11-07 – Ziel z1 – Serverwartung.pdf"
     assert expected.exists()
 
     log_line = (data_dir / "archiv.log").read_text(encoding="utf-8").strip()
@@ -366,6 +371,7 @@ def test_upload_jahresordner_creates_year_subfolder(tmp_path, monkeypatch):
     result = {
         "ziel_id": "z1",
         "datum": "2026-11-07",
+        "dokumentname": "Ueberweisung",
         "absender": "Arzt",
         "dokumenttyp": "Brief",
         "sicherheit": 0.9,
@@ -377,7 +383,7 @@ def test_upload_jahresordner_creates_year_subfolder(tmp_path, monkeypatch):
     response = _upload(client)
     assert response.get_json()["status"] == "abgelegt"
 
-    expected = ablage_dir / "standard" / "healing" / "2026" / "2026-11-07 – Arzt – Brief.pdf"
+    expected = ablage_dir / "standard" / "healing" / "2026" / "2026-11-07 – Ziel z1 – Ueberweisung.pdf"
     assert expected.exists()
 
 
@@ -649,7 +655,9 @@ def test_login_flow_and_start_page(tmp_path, monkeypatch):
     assert "Scannen" in html
     assert "Hochladen" in html
     assert "Eingangskorb" in html
-    assert "Vorschlag prüfen" in html
+    # Die beiden Arbeitsbereiche der Schritte 4/5 (Ziel, Ausführen).
+    assert "Ziel wählen" in html
+    assert "Ausführen und ablegen" in html
     assert "Eingangskorb" in html
     assert "Zur Prüfung" in html
 
@@ -1313,13 +1321,14 @@ def test_vorschlag_legt_nichts_ab(tmp_path, monkeypatch):
     assert not (data_dir / "archiv.log").exists()
 
 
-def test_vorschlag_ohne_ziele_meldet_fehler(tmp_path, monkeypatch):
+def test_vorschlag_auch_ohne_ziele(tmp_path, monkeypatch):
+    """Ohne angelegte Ziele schlaegt die KI trotzdem einen Ordnernamen vor."""
     client, _data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
     (korb / "scan.pdf").write_bytes(b"%PDF")
 
     r = client.post("/api/korb/scan.pdf/vorschlag")
-    assert r.status_code == 400
-    assert "Ziel" in r.get_json()["error"]
+    assert r.status_code == 200, r.get_json()
+    assert "vorschlag" in r.get_json()
 
 
 def test_vorschlag_fuer_unbekannte_datei_gibt_404(tmp_path, monkeypatch):
@@ -1650,8 +1659,9 @@ def test_vorschlag_liefert_dateiname_und_pfad(tmp_path, monkeypatch):
     assert r.status_code == 200, body
     if body.get("vorschlag"):
         assert "dateiname" in body["vorschlag"]
-        assert "pfad" in body["vorschlag"]
+        assert "ordner" in body["vorschlag"]
         assert "speicherort" in body["vorschlag"]
+        assert "ordner_vorhanden" in body["vorschlag"]
 
 
 # ---------------------------------------------------------------------------
@@ -1806,3 +1816,346 @@ def test_scan_dateiname_nutzt_lokale_zeit(tmp_path, monkeypatch):
     name = r.get_json()["name"]
     erwartet = appmod.config.jetzt().strftime("%Y-%m-%d_%H")
     assert erwartet in name, f"Lokale Zeit fehlt im Namen: {name}"
+
+
+def test_ordner_liste_blendet_standard_aus(tmp_path, monkeypatch):
+    """Sobald ein echter Speicherort existiert, wird der Testordner
+    'standard' nicht mehr angeboten."""
+    import app.app as appmod
+    import app.storage as storage
+
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        storage,
+        "locations",
+        lambda: [
+            {"name": "standard", "host_pfad": "/tmp/ablage", "label": "Standard"},
+            {"name": "archiv", "host_pfad": "/tmp/archiv", "label": "Archiv"},
+        ],
+    )
+    monkeypatch.setattr(storage, "list_folders", lambda s, p: ([], False))
+
+    r = client.get("/api/ablage/ordner-liste").get_json()
+    namen = [s["speicherort"] for s in r["speicherorte"]]
+    assert namen == ["archiv"], f"standard haette ausgeblendet sein muessen: {namen}"
+
+
+def test_ordner_liste_zeigt_standard_wenn_allein(tmp_path, monkeypatch):
+    """Ohne echten Speicherort bleibt 'standard' sichtbar."""
+    import app.storage as storage
+
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        storage,
+        "locations",
+        lambda: [
+            {"name": "standard", "host_pfad": "/tmp/ablage", "label": "Standard"}
+        ],
+    )
+    monkeypatch.setattr(storage, "list_folders", lambda s, p: ([], False))
+
+    r = client.get("/api/ablage/ordner-liste").get_json()
+    assert [s["speicherort"] for s in r["speicherorte"]] == ["standard"]
+
+
+# ---------------------------------------------------------------------------
+# Neue Ordner dürfen vorgeschlagen und angelegt werden
+# ---------------------------------------------------------------------------
+
+
+def test_safe_ordnername_bereinigt():
+    for boese, erwartet in (
+        ("../../etc", "etc"),
+        ("A/B", "B"),
+        ("Test.pdf", "Test"),
+        ("", "Sonstiges"),
+        ("   ", "Sonstiges"),
+        ("Arzt: Bericht", "Arzt Bericht"),
+    ):
+        assert pipeline.safe_ordnername(boese) == erwartet, boese
+    assert pipeline.safe_ordnername("Übungen") == "Übungen"
+
+
+def test_ablegen_legt_neuen_ordner_an(tmp_path, monkeypatch):
+    """Ein vorgeschlagener Ordnername, den es noch nicht gibt, wird angelegt."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={
+            "speicherort": "standard",
+            "pfad": "Uebungsanleitungen",
+            "dateiname": "2026-11-08 – Uebungsanleitung.pdf",
+        },
+    )
+    assert r.status_code == 200, r.get_json()
+    ordner = data_dir.parent / "ablage" / "standard" / "Uebungsanleitungen"
+    assert ordner.is_dir(), "Ordner wurde nicht angelegt"
+    assert list(ordner.glob("*.pdf"))
+
+
+def test_ablegen_verhindert_ordner_traversal(tmp_path, monkeypatch):
+    """Ein Ordnername mit Pfadanteil darf nicht aus dem Archiv ausbrechen."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={"speicherort": "standard", "pfad": "../../ausserhalb"},
+    )
+    assert r.status_code in (200, 400), r.get_json()
+    if r.status_code == 200:
+        # Nichts darf ausserhalb des Ablageordners entstanden sein.
+        assert not (data_dir.parent / "ausserhalb").exists()
+
+
+def test_dateiname_nutzt_dokumentdatum():
+    """Das Datum aus dem Dokument hat Vorrang vor dem Scandatum."""
+    r = pipeline.output_filename(
+        {"datum": "2026-10-15", "dokumentname": "Serverwartung",
+         "dokumenttyp": "Rechnung"},
+        fallback_datum="2026-11-08",
+        ordner="Rechnungen",
+    )
+    assert r == "2026-10-15 – Rechnungen – Serverwartung.pdf"
+
+
+def test_dateiname_faellt_auf_scandatum_zurueck():
+    """Ohne Datum im Dokument wird das Scandatum verwendet."""
+    r = pipeline.output_filename(
+        {"datum": "", "dokumentname": "Ischias", "dokumenttyp": "Uebungsanleitung"},
+        fallback_datum="2026-11-08",
+        ordner="Uebungsanleitungen",
+    )
+    assert r == "2026-11-08 – Uebungsanleitungen – Ischias.pdf"
+
+
+def test_dateiname_ohne_platzhalter():
+    """Leere Teile werden weggelassen – kein 'Unbekannt'."""
+    r = pipeline.output_filename(
+        {"datum": "2026-11-08", "dokumentname": "", "dokumenttyp": "Uebungsanleitung"},
+        ordner="Uebungsanleitungen",
+    )
+    assert r == "2026-11-08 – Uebungsanleitungen – Uebungsanleitung.pdf"
+    assert "Unbekannt" not in r
+
+
+def test_dateiname_verdoppelt_kein_datum():
+    """Steht im Originalnamen schon ein Datum, wird keines vorangestellt."""
+    r = pipeline.output_filename(
+        {"datum": "2026-11-08", "absender": "", "dokumenttyp": ""},
+        original_name="Scan_2026-11-08_14-01-32.pdf",
+        fallback_datum="2026-11-08",
+    )
+    assert r == "Scan_2026-11-08_14-01-32.pdf"
+
+
+# ---------------------------------------------------------------------------
+# Dateiformate beim Scannen und Ablegen
+# ---------------------------------------------------------------------------
+
+
+def _jpeg_bytes():
+    import io as _io
+
+    from PIL import Image
+
+    buf = _io.BytesIO()
+    Image.new("RGB", (40, 20), (200, 200, 200)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def test_scan_format_pdf_ergibt_pdf(tmp_path, monkeypatch):
+    import app.app as appmod
+    from app import scanner_escl as es
+
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "http://test")
+    monkeypatch.setattr(
+        es, "scanne", lambda *a, **k: (b"%PDF-1.4 x", "application/pdf")
+    )
+
+    r = client.post("/api/scanner/scan", json={"format": "pdf"})
+    name = r.get_json()["name"]
+    assert name.endswith(".pdf")
+    assert (korb / name).read_bytes().startswith(b"%PDF")
+
+
+def test_scan_format_jpeg_ergibt_jpg(tmp_path, monkeypatch):
+    import app.app as appmod
+    from app import scanner_escl as es
+
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "http://test")
+    monkeypatch.setattr(
+        es, "scanne", lambda *a, **k: (_jpeg_bytes(), "image/jpeg")
+    )
+
+    r = client.post("/api/scanner/scan", json={"format": "jpeg"})
+    name = r.get_json()["name"]
+    assert name.endswith(".jpg"), name
+    assert (korb / name).read_bytes().startswith(b"\xff\xd8")
+
+
+def test_scan_format_png_wandelt_um(tmp_path, monkeypatch):
+    """Der Scanner kann kein PNG – der Hub wandelt das JPEG um."""
+    import app.app as appmod
+    from app import scanner_escl as es
+
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "http://test")
+
+    aufgerufen = {}
+
+    def fake_scan(url, quelle, aufloesung, farbmodus, duplex, format_):
+        aufgerufen["format"] = format_
+        return _jpeg_bytes(), "image/jpeg"
+
+    monkeypatch.setattr(es, "scanne", fake_scan, raising=False)
+    monkeypatch.setattr(es, "scanne", fake_scan)
+
+    r = client.post("/api/scanner/scan", json={"format": "png"})
+    name = r.get_json()["name"]
+    assert name.endswith(".png"), name
+    # Der Scanner wurde mit JPEG beauftragt, nicht mit PNG.
+    assert aufgerufen.get("format") == "jpeg"
+    assert (korb / name).read_bytes().startswith(b"\x89PNG")
+
+
+def test_scan_lehnt_unbekanntes_format_ab(tmp_path, monkeypatch):
+    import app.app as appmod
+
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "http://test")
+    r = client.post("/api/scanner/scan", json={"format": "docx"})
+    assert r.status_code == 400
+
+
+def test_bild_bleibt_beim_ablegen_bild(tmp_path, monkeypatch):
+    """Ein JPEG im Korb wird als JPEG abgelegt, nicht in PDF umgewandelt."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.jpg").write_bytes(_jpeg_bytes())
+
+    r = client.post(
+        "/api/korb/scan.jpg/ablegen",
+        json={
+            "speicherort": "standard",
+            "pfad": "Bilder",
+            "dateiname": "2026-11-08 – Foto.jpg",
+        },
+    )
+    assert r.status_code == 200, r.get_json()
+    treffer = list((data_dir.parent / "ablage" / "standard" / "Bilder").glob("*"))
+    assert len(treffer) == 1
+    assert treffer[0].suffix == ".jpg", treffer[0].name
+    assert treffer[0].read_bytes().startswith(b"\xff\xd8")
+
+
+def test_pdf_wird_beim_ablegen_pdf(tmp_path, monkeypatch):
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF-1.4 original")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={"speicherort": "standard", "pfad": "", "dateiname": "Dokument.pdf"},
+    )
+    assert r.status_code == 200, r.get_json()
+    treffer = list((data_dir.parent / "ablage" / "standard").glob("*.pdf"))
+    assert treffer and treffer[0].read_bytes().startswith(b"%PDF")
+
+
+def test_safe_filename_behaelt_gewuenschte_endung():
+    assert pipeline.safe_filename("Bild", endung=".jpg") == "Bild.jpg"
+    assert pipeline.safe_filename("Bild.png", endung=".jpg") == "Bild.jpg"
+    assert pipeline.safe_filename("Bild", endung=".png") == "Bild.png"
+    # Standard bleibt PDF.
+    assert pipeline.safe_filename("Bild") == "Bild.pdf"
+
+
+# ---------------------------------------------------------------------------
+# Umlaute in Ordnernamen und Dateinamen
+# ---------------------------------------------------------------------------
+
+
+def test_ordnername_behaelt_umlaute():
+    """ä, ö, ü und ß dürfen nicht verstümmelt werden."""
+    for name in ("Übungsanleitungen", "Prämien", "Ärzte", "Größe", "Straße"):
+        assert pipeline.safe_ordnername(name) == name
+
+
+def test_dateiname_behaelt_umlaute():
+    name = pipeline.safe_filename("2026-11-08 – Übungsanleitungen – Prämien.pdf")
+    assert name == "2026-11-08 – Übungsanleitungen – Prämien.pdf"
+
+
+def test_umlaut_und_umschreibung_gelten_als_gleich():
+    """Für die Doppelungs-Prüfung sind Ü/UE gleich."""
+    r = pipeline.output_filename(
+        {"datum": "2026-11-08", "dokumentname": "Übungsanleitungen",
+         "dokumenttyp": "X"},
+        ordner="Uebungsanleitungen",
+    )
+    # Nicht doppelt nennen – die Schreibweise des Dokuments gewinnt.
+    assert r == "2026-11-08 – Übungsanleitungen.pdf"
+
+
+# ---------------------------------------------------------------------------
+# JavaScript: aufgerufene Funktionen müssen auch definiert sein
+# ---------------------------------------------------------------------------
+
+
+def test_js_ruft_nur_definierte_funktionen_auf():
+    """Findet Tippfehler und versehentlich gelöschte Funktionen.
+
+    Hintergrund: Ein fehlender Funktionsname führt im Browser zu einem
+    ReferenceError, der die restliche Ausführung einer Funktion abbricht –
+    das bleibt bei Python-Tests unbemerkt.
+    """
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+
+    definiert = set(re.findall(r"function\s+(\w+)", js))
+    definiert |= set(re.findall(r"var\s+(\w+)\s*=", js))
+    definiert |= set(re.findall(r"(\w+)\s*=\s*function", js))
+
+    # Eigene Aufrufe: Wort mit Klammer, das wie eine Projektfunktion aussieht.
+    eigen = re.findall(r"\b((?:zeige|leere|setze|lade|starte|stoppe|pruefe|"
+                       r"scan|korb|neuen|aktu|ziel|ausfuehr|vorschlag|"
+                       r"ordner|wahl|speicherort)\w*)\s*\(", js)
+
+    fehlend = sorted(set(eigen) - definiert)
+    assert not fehlend, f"Nicht definierte Funktionen aufgerufen: {fehlend}"
+
+
+def test_js_blendet_schritte_nach_dem_ablegen_nicht_aus():
+    """Die Schritte 4 und 5 müssen sichtbar bleiben (Anforderung des Nutzers)."""
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+
+    # Beim Ablegen darf nicht ausgeblendet werden.
+    stelle = js.index('"/ablegen", "POST"')
+    umgebung = js[stelle:stelle + 900]
+    assert "zeigeArbeitsbereiche(false" not in umgebung, (
+        "Nach dem Ablegen dürfen die Bereiche nicht ausgeblendet werden"
+    )
+
+
+def test_js_graut_ablegen_nach_dem_ablegen_aus():
+    """Nach dem Ablegen wird der Knopf inaktiv; 'Zurück' macht ihn wieder aktiv."""
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+
+    # Der Merker existiert und wird gesetzt bzw. zurückgesetzt.
+    assert "bereitsAbgelegt" in js
+    assert "bereitsAbgelegt = true" in js, "Merker wird nach dem Ablegen nicht gesetzt"
+    assert "bereitsAbgelegt = false" in js, "Merker wird nicht zurückgesetzt"
+
+    # Der Knopfzustand berücksichtigt den Merker.
+    assert "ablageOffen && !bereitsAbgelegt" in js, (
+        "Der Ablegen-Knopf berücksichtigt den Merker nicht"
+    )
+
+    # Der Zurück-Knopf setzt den Merker zurück.
+    stelle = js.index('document.getElementById("btn-zurueck")')
+    umgebung = js[stelle:stelle + 500]
+    assert "bereitsAbgelegt = false" in umgebung, (
+        "Zurück setzt den Merker nicht zurück"
+    )
