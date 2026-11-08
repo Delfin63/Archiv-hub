@@ -74,6 +74,12 @@ data/archiv.log (eine JSON-Zeile pro Dokument)
 - Ein Ziel mit unbekanntem Speicherort landet in `data/zur-pruefung/`.
 - API-Schlüssel liegen nur in `.env` (nie eingecheckt). Der Passwort-Login
   nutzt einen Passwort-Hash (`ARCHIV_HUB_PASSWORD_HASH`), keinen Klartext.
+- Alle zustandsändernden Anfragen (`POST`, `PUT`, `PATCH`, `DELETE`) benötigen
+  ein CSRF-Token der Sitzung. Es wird pro Sitzung erzeugt und als
+  `X-CSRF-Token`-Header (oder Formularfeld `csrf_token`) erwartet; fehlt oder
+  passt es nicht, antwortet die App mit `403`. `GET` bleibt frei. Die
+  Skripte holen das Token über `archivCsrf()` aus `window.ARCHIV_HUB_CSRF`
+  (`app/templates/base.html`, `app/static/archiv.js`).
 
 ## Speicherorte
 

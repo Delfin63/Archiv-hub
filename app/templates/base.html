@@ -35,6 +35,7 @@
     <div class="container">Archiv Hub · Version {{ app_version }}</div>
   </footer>
 
+  <script>window.ARCHIV_HUB_CSRF = "{{ csrf_token }}";</script>
   <script src="{{ url_for('static', filename='archiv.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

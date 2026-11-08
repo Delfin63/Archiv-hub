@@ -46,6 +46,40 @@ RSYNC_RSH="ssh -p ${SYNOLOGY_SSH_PORT} -o ConnectTimeout=10 -o StrictHostKeyChec
 
 run_ssh() { ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "$@"; }
 
+fail() {
+  echo
+  echo "ABBRUCH: $1"
+  echo "Es wurde nichts übertragen."
+  exit 1
+}
+
+# Nur ein committeter Stand darf auf die NAS: sonst landen unfertige oder
+# versehentliche Änderungen (und Dateien, die .gitignore gerade noch abfängt)
+# im Produktivbetrieb. --allow-dirty übergeht die Prüfung bewusst.
+ALLOW_DIRTY=0
+for arg in "$@"; do
+  case "$arg" in
+    --allow-dirty) ALLOW_DIRTY=1 ;;
+    -h|--help)
+      echo "Verwendung: deploy-synology.sh [--allow-dirty]"
+      echo "  --allow-dirty  Deploy auch bei nicht committeten Änderungen"
+      exit 0
+      ;;
+    *) fail "Unbekanntes Argument: $arg" ;;
+  esac
+done
+
+if [[ "$ALLOW_DIRTY" -eq 0 ]]; then
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo "Offene Änderungen im Working Tree:"
+    echo
+    git status --short
+    echo
+    fail "Working Tree ist nicht sauber. Erst committen oder --allow-dirty verwenden."
+  fi
+  echo "Working Tree ist sauber ($(git rev-parse --short HEAD))."
+fi
+
 echo "Prüfe SSH-Verbindung zu ${SSH_TARGET} ..."
 run_ssh true || { echo "FEHLER: SSH-Verbindung fehlgeschlagen."; exit 1; }
 

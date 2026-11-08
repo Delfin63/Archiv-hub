@@ -11,7 +11,12 @@ uploadForm.addEventListener("submit", function (event) {
   erg.className = "msg";
   erg.textContent = "Verarbeite …";
 
-  fetch("/api/upload", { method: "POST", body: fd, credentials: "same-origin" })
+  fetch("/api/upload", {
+    method: "POST",
+    body: fd,
+    credentials: "same-origin",
+    headers: { "X-CSRF-Token": archivCsrf() }
+  })
     .then(function (r) {
       return r.json().then(function (d) { return { ok: r.ok, d: d }; });
     })

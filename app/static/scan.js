@@ -154,7 +154,12 @@ function verarbeiteDatei(file, einstellungen) {
     fd.append("duplex", einstellungen.duplex ? "1" : "0");
   }
   setErgebnis("Verarbeite " + file.name + " …", "");
-  return fetch("/api/upload", { method: "POST", body: fd, credentials: "same-origin" })
+  return fetch("/api/upload", {
+    method: "POST",
+    body: fd,
+    credentials: "same-origin",
+    headers: { "X-CSRF-Token": archivCsrf() }
+  })
     .then(function (r) {
       return r.json().then(function (d) { return { ok: r.ok, d: d }; });
     })

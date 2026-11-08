@@ -321,6 +321,12 @@ def _client_with_tmp_dirs(tmp_path, monkeypatch, classify_result, ziele):
     login = client.post("/login", data={"password": "geheim"})
     assert login.get_json()["ok"] is True
 
+    # CSRF-Token der angemeldeten Sitzung setzen, damit zustandsändernde
+    # Anfragen (POST/PUT/DELETE) nicht mit 403 abgewiesen werden.
+    with client.session_transaction() as sess:
+        sess["csrf_token"] = "test-csrf-token"
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "test-csrf-token"
+
     return client, data_dir, ablage_dir
 
 
@@ -473,6 +479,9 @@ def test_delete_ziel_keeps_files(tmp_path, monkeypatch):
     appmod.app.testing = True
     client = appmod.app.test_client()
     client.post("/login", data={"password": "geheim"})
+    with client.session_transaction() as sess:
+        sess["csrf_token"] = "test-csrf-token"
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "test-csrf-token"
 
     # Datei im Ablage-Ordner anlegen
     ziel_ordner = ablage_dir / "healing"
@@ -1064,3 +1073,79 @@ def test_ablage_ordner_mehr_als_500(tmp_path, monkeypatch):
     assert body["ok"] is True
     assert len(body["ordner"]) == 500
     assert body["mehr"] is True
+
+
+# ---------------------------------------------------------------------------
+# CSRF-Schutz
+# ---------------------------------------------------------------------------
+
+
+def test_csrf_token_wird_an_die_seite_ausgeliefert(tmp_path, monkeypatch):
+    client, _data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    html = client.get("/").get_data(as_text=True)
+    assert "ARCHIV_HUB_CSRF" in html
+
+
+def test_post_ohne_csrf_token_wird_abgewiesen(tmp_path, monkeypatch):
+    client, data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    # Token wieder entfernen: der Client sendet dann keinen Header mehr.
+    del client.environ_base["HTTP_X_CSRF_TOKEN"]
+
+    r = client.post(
+        "/api/ziele", json={"name": "Ohne", "pfad": "ohne"}
+    )
+    assert r.status_code == 403
+    assert r.get_json()["ok"] is False
+
+    # Nichts wurde angelegt.
+    assert json.loads((data_dir / "ziele.json").read_text(encoding="utf-8")) == []
+
+
+def test_post_mit_falschem_csrf_token_wird_abgewiesen(tmp_path, monkeypatch):
+    client, data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "falsches-token"
+
+    r = client.post("/api/ziele", json={"name": "Falsch", "pfad": "falsch"})
+    assert r.status_code == 403
+    assert json.loads((data_dir / "ziele.json").read_text(encoding="utf-8")) == []
+
+
+def test_post_mit_gueltigem_csrf_token_ist_erlaubt(tmp_path, monkeypatch):
+    client, _data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    r = client.post("/api/ziele", json={"name": "Gültig", "pfad": "gueltig"})
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+
+
+def test_get_braucht_kein_csrf_token(tmp_path, monkeypatch):
+    client, _data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    del client.environ_base["HTTP_X_CSRF_TOKEN"]
+    assert client.get("/api/ziele").status_code == 200
+    assert client.get("/").status_code == 200
+
+
+def test_upload_mit_formularfeld_csrf_token(tmp_path, monkeypatch):
+    """Multipart-Formulare duerfen das Token auch als Feld senden."""
+    client, _data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, {"ziel_id": "unklar", "sicherheit": 0.1}, []
+    )
+    del client.environ_base["HTTP_X_CSRF_TOKEN"]
+    r = client.post(
+        "/api/upload",
+        data={
+            "file": (io.BytesIO(_sample_pdf_bytes()), "sample.pdf"),
+            "csrf_token": "test-csrf-token",
+        },
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200

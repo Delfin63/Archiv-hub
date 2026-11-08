@@ -14,6 +14,7 @@ kein Klartext).
 """
 
 import hashlib
+import hmac
 import os
 import secrets
 import shutil
@@ -75,7 +76,7 @@ def _read_version():
 
 @app.context_processor
 def inject_app_version():
-    return {"app_version": _read_version()}
+    return {"app_version": _read_version(), "csrf_token": _csrf_token()}
 
 
 def _is_authenticated():
@@ -85,9 +86,45 @@ def _is_authenticated():
     )
 
 
+def _csrf_token():
+    """Liefert das CSRF-Token der aktuellen Sitzung (erzeugt es bei Bedarf)."""
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+def _csrf_ok():
+    """Prüft das CSRF-Token aus Formularfeld oder Header.
+
+    Das Token wird bei jeder Sitzung neu erzeugt und nie in einem Cookie
+    gespeichert, das ein fremder Ursprung setzen könnte (Double-Submit wäre
+    fälschbar). Vergleich mit konstanter Laufzeit über hmac.compare_digest.
+    """
+    expected = session.get("csrf_token") or ""
+    if not expected:
+        return False
+    sent = (
+        request.form.get("csrf_token")
+        or request.headers.get("X-CSRF-Token")
+        or ""
+    )
+    return hmac.compare_digest(expected, sent)
+
+
 @app.before_request
 def require_login():
     if _is_authenticated():
+        # CSRF nur für zustandsändernde Methoden prüfen.
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            if not _csrf_ok():
+                if request.path.startswith("/api/"):
+                    return (
+                        jsonify({"ok": False, "error": "Ungültiges CSRF-Token."}),
+                        403,
+                    )
+                return "Ungültiges CSRF-Token.", 403
         return None
     if session.get("authenticated"):
         session.clear()

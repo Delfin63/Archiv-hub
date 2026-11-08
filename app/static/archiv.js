@@ -8,15 +8,28 @@ function esc(s) {
   });
 }
 
+// CSRF-Token der Sitzung (von base.html als window.ARCHIV_HUB_CSRF gesetzt).
+// Wird bei allen zustandsändernden Anfragen als Header mitgeschickt.
+function archivCsrf() {
+  return window.ARCHIV_HUB_CSRF || "";
+}
+
 function archivLogout() {
-  fetch("/logout", { method: "POST", credentials: "same-origin" })
-    .finally(function () { window.location.href = "/login"; });
+  fetch("/logout", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "X-CSRF-Token": archivCsrf() }
+  }).finally(function () { window.location.href = "/login"; });
 }
 
 // fetch-JSON-Helfer: liefert das JSON, wirft bei !ok und leitet bei 401 auf
 // die Anmeldung um.
 function api(url, method, body) {
-  var opt = { method: method, headers: {} };
+  var opt = {
+    method: method,
+    credentials: "same-origin",
+    headers: { "X-CSRF-Token": archivCsrf() }
+  };
   if (body) {
     opt.headers["Content-Type"] = "application/json";
     opt.body = JSON.stringify(body);
