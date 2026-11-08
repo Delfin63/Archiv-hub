@@ -15,6 +15,9 @@ services:
       # deploy-synology.sh aufgelöst, bevor compose läuft). Der Mount oben
       # bleibt unverändert.
       ARCHIV_HUB_ABLAGE_BASIS_ANZEIGE: ${ARCHIV_HUB_ABLAGE_BASIS_ANZEIGE:-}
+      # HOST-Pfad des Eingangskorbs (data/input), ebenfalls nur zur Anzeige
+      # und für den Finder-Link. Wird von Skript 60 aufgelöst.
+      ARCHIV_HUB_KORB_HOST_PFAD: ${ARCHIV_HUB_KORB_HOST_PFAD:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}

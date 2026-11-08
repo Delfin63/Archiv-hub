@@ -20,27 +20,35 @@
   <h2 id="form-titel">Ziel anlegen</h2>
   <form id="ziel-form">
     <input type="hidden" id="ziel-id">
-    <label>Name <input type="text" id="name" required></label>
-    <label>Speicherort <select id="speicherort"></select></label>
 
-    <div class="navigator">
-      <div class="brotkrumen" id="brotkrumen"></div>
-      <ul class="ordner-liste" id="ordner-liste"></ul>
-      <div class="navigator-aktionen">
-        <button type="button" class="btn btn-secondary" onclick="ebeneHoeher()">Eine Ebene höher</button>
-        <button type="button" class="btn btn-primary" onclick="ordnerWaehlen()">Diesen Ordner wählen</button>
-      </div>
-      <div class="toolbar">
-        <input type="text" id="neuer-ordner" placeholder="Neuer Ordner hier (Name)">
-        <button type="button" class="btn btn-secondary" onclick="neuerOrdner()">Anlegen</button>
-      </div>
-      <div class="host-pfad" id="host-pfad"></div>
+    <label>Name
+      <input type="text" id="name" required placeholder="z. B. Rechnungen">
+    </label>
+
+    <label>Speicherort
+      <select id="speicherort"></select>
+    </label>
+
+    <label>Ordner
+      <select id="ordner-wahl"></select>
+    </label>
+
+    <div class="neuer-ordner-zeile">
+      <input type="text" id="neuer-ordner" placeholder="Neuen Ordner anlegen …">
+      <button type="button" class="btn btn-secondary" onclick="neuerOrdner()">Anlegen</button>
     </div>
 
+    <div class="host-pfad" id="host-pfad"></div>
+
+    <label>Beschreibung (für die KI)
+      <textarea id="beschreibung" rows="2"
+        placeholder="z. B. Rechnungen und Quittungen, die per Post eingehen"></textarea>
+    </label>
+
     <label>Hub (optional) <select id="hub"></select></label>
-    <label>Beschreibung (für die KI) <textarea id="beschreibung" rows="2"></textarea></label>
     <label><input type="checkbox" id="jahresordner"> Jahresordner</label>
     <label><input type="checkbox" id="aktiv" checked> Aktiv</label>
+
     <div class="form-actions">
       <button type="button" class="btn btn-primary" onclick="saveZiel()">Speichern</button>
       <button type="button" class="btn btn-secondary" onclick="resetForm()">Zurücksetzen</button>

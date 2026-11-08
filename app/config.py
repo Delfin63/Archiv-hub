@@ -76,6 +76,16 @@ def standard_host_pfad():
     )
 
 
+def korb_host_pfad():
+    """HOST-Pfad des Eingangskorbs (data/input) für Anzeige und Finder-Link.
+
+    Im Container ist das /app/data/input – dieser Pfad nützt auf dem Mac
+    nichts. Das Startskript 60 bzw. deploy-synology.sh löst den echten Pfad
+    auf und übergibt ihn als ARCHIV_HUB_KORB_HOST_PFAD.
+    """
+    return os.environ.get("ARCHIV_HUB_KORB_HOST_PFAD") or ""
+
+
 STANDARD_HOST_PFAD = standard_host_pfad()
 CONFIDENCE_THRESHOLD = float(_settings.get("confidence_threshold", 0.7))
 

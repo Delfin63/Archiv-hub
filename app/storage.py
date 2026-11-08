@@ -8,6 +8,8 @@ Quellcode überträgt und data/ unangetastet lässt.
 import json
 import re
 import secrets
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 from . import config
@@ -110,6 +112,117 @@ def find_speicherort(name):
 
 def is_known_speicherort(name):
     return find_speicherort(name) is not None
+
+
+# ---- Eingangskorb -----------------------------------------------------------
+#
+# Der Eingangskorb ist der Ordner, in den neue Dateien gelegt werden – per
+# Upload oder indem ein Scanner direkt dorthin schreibt (macOS "Digitale
+# Bilder" -> "Scannen in"). Die Dateien werden NICHT automatisch verarbeitet:
+# der Nutzer sieht sie in der Oberfläche, prüft sie und stösst die Verarbeitung
+# selbst an. Nach erfolgreicher Ablage wandert das Original nach
+# data/input/erledigt/ (Variante C: nichts wird gelöscht).
+
+ERLEDIGT_ORDNER = "erledigt"
+
+# Endungen, die der Eingangskorb anzeigt und verarbeiten darf.
+KORB_ENDUNGEN = {
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".tif",
+    ".tiff",
+    ".bmp",
+    ".webp",
+}
+
+
+def korb_dir():
+    """Eingangskorb (data/input)."""
+    return config.INPUT_DIR
+
+
+def korb_erledigt_dir():
+    """Ablage der verarbeiteten Originale (data/input/erledigt)."""
+    return korb_dir() / ERLEDIGT_ORDNER
+
+
+def _korb_eintrag(path):
+    """Beschreibt eine Datei im Korb für die Oberfläche."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return {
+        "name": path.name,
+        "endung": path.suffix.lower(),
+        "groesse": stat.st_size,
+        "geaendert": datetime.fromtimestamp(stat.st_mtime).isoformat(
+            timespec="seconds"
+        ),
+    }
+
+
+def list_korb():
+    """Dateien im Eingangskorb, neueste zuerst. Unterordner werden ignoriert."""
+    basis = korb_dir()
+    if not basis.is_dir():
+        return []
+
+    eintraege = []
+    for pfad in basis.iterdir():
+        # Nur echte Dateien: "erledigt/" und alles andere fliegt raus.
+        if pfad.is_symlink() or not pfad.is_file():
+            continue
+        if pfad.name.startswith("."):
+            continue
+        if pfad.suffix.lower() not in KORB_ENDUNGEN:
+            continue
+        eintrag = _korb_eintrag(pfad)
+        if eintrag is not None:
+            eintraege.append(eintrag)
+
+    eintraege.sort(key=lambda e: e["geaendert"], reverse=True)
+    return eintraege
+
+
+def korb_datei(name):
+    """Löst einen Korb-Dateinamen sicher auf (kein Pfad, keine Traversal)."""
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return None
+    if Path(name).name != name:
+        return None
+    pfad = korb_dir() / name
+    # Nach resolve() prüfen, damit auch Symlinks nicht ausbrechen.
+    try:
+        if not pfad.resolve().parent == korb_dir().resolve():
+            return None
+    except OSError:
+        return None
+    return pfad if pfad.is_file() else None
+
+
+def korb_erledigt(name):
+    """Verschiebt ein verarbeitetes Original nach data/input/erledigt/.
+
+    Variante C: das Original wird nie gelöscht. Existiert der Zielname schon,
+    wird ein Zähler angehängt, damit nichts überschrieben wird.
+    """
+    quelle = korb_datei(name)
+    if quelle is None:
+        return None
+    ziel_dir = korb_erledigt_dir()
+    ziel_dir.mkdir(parents=True, exist_ok=True)
+
+    ziel = ziel_dir / quelle.name
+    zaehler = 2
+    while ziel.exists():
+        ziel = ziel_dir / f"{quelle.stem} ({zaehler}){quelle.suffix}"
+        zaehler += 1
+
+    shutil.move(str(quelle), str(ziel))
+    return ziel
 
 
 # ---- Pfadsicherheit ---------------------------------------------------------

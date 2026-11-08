@@ -684,8 +684,11 @@ def test_login_flow_and_start_page(tmp_path, monkeypatch):
     response = client.get("/")
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Dokument hochladen" in html
-    assert "Ziele" in html
+    # Gefuehrter Ablauf: die drei Schritte sind auf der Startseite angelegt.
+    assert "Material einfügen" in html
+    assert "Ablageort" in html
+    assert "Ablegen" in html
+    assert "Eingangskorb" in html
     assert "Zur Prüfung" in html
 
 
@@ -862,6 +865,15 @@ def test_archiv_css_hat_farbvariablen():
     assert ":root" in css
     for var in ("--navy", "--blue", "--cyan", "--yellow", "--green", "--red", "--bg"):
         assert f"{var}:" in css
+
+
+def test_archiv_css_verwendet_nur_definierte_variablen():
+    """Jede var(--x) muss auch definiert sein, sonst wirkt die Regel nicht."""
+    css = (PROJECT_DIR / "app" / "static" / "archiv.css").read_text(encoding="utf-8")
+    definiert = set(re.findall(r"^\s*(--[a-z0-9-]+)\s*:", css, re.M))
+    verwendet = set(re.findall(r"var\((--[a-z0-9-]+)", css))
+    fehlend = sorted(verwendet - definiert)
+    assert not fehlend, f"Nicht definierte CSS-Variablen: {fehlend}"
 
 
 def test_migration_speicherort_default(tmp_path, monkeypatch):
@@ -1149,3 +1161,431 @@ def test_upload_mit_formularfeld_csrf_token(tmp_path, monkeypatch):
         content_type="multipart/form-data",
     )
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Eingangskorb (data/input) – Dateien werden NICHT automatisch verarbeitet
+# ---------------------------------------------------------------------------
+
+
+def _korb_client(tmp_path, monkeypatch, ziele=None):
+    """Client mit Eingangskorb; OCR und Klassifizierung sind ersetzt."""
+    import app.app as appmod
+
+    client, data_dir, ablage_dir = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, ziele if ziele is not None else []
+    )
+    korb = data_dir / "input"
+    korb.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(appmod.config, "INPUT_DIR", korb)
+
+    def fake_ocr(src, work):
+        aus = work / "out.pdf"
+        aus.write_bytes(b"%PDF-1.4 out")
+        return aus, "erkannter text"
+
+    monkeypatch.setattr(appmod.ocr, "process", fake_ocr)
+    return client, data_dir, korb
+
+
+def test_korb_listet_nur_unterstuetzte_dateien(tmp_path, monkeypatch):
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+    (korb / "bild.jpg").write_bytes(b"jpg")
+    (korb / "notiz.txt").write_text("nein")
+    (korb / ".versteckt.pdf").write_bytes(b"%PDF")
+    (korb / "unterordner").mkdir()
+
+    r = client.get("/api/korb")
+    namen = sorted(f["name"] for f in r.get_json()["dateien"])
+    assert namen == ["bild.jpg", "scan.pdf"]
+
+
+def test_korb_datei_wird_nicht_automatisch_verarbeitet(tmp_path, monkeypatch):
+    """Eine Datei im Korb darf ohne Anstoss nichts ausloesen."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    assert client.get("/api/korb").get_json()["dateien"]
+    # Es wurde nichts verarbeitet: kein Log, keine Kopie im Archiv.
+    assert not (data_dir / "archiv.log").exists()
+    assert not list((data_dir.parent / "ablage").rglob("*.pdf"))
+
+
+def test_korb_verarbeiten_legt_ab_und_behaelt_original(tmp_path, monkeypatch):
+    """Variante C: Kopie im Ziel, Original wandert nach erledigt/."""
+    ziel = _ziel(id="z1", pfad="rechnungen")
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [ziel])
+    (korb / "scan.pdf").write_bytes(b"%PDF original")
+
+    r = client.post("/api/korb/scan.pdf/verarbeiten", json={"ziel_id": "z1"})
+    body = r.get_json()
+    assert r.status_code == 200, body
+    assert body["status"] == "abgelegt"
+
+    # Original ist nicht mehr im Korb, aber auch nicht geloescht.
+    assert not (korb / "scan.pdf").exists()
+    assert (korb / "erledigt" / "scan.pdf").read_bytes() == b"%PDF original"
+
+    # Kopie liegt im Zielordner.
+    kopien = list((data_dir.parent / "ablage").rglob("*.pdf"))
+    assert len(kopien) == 1
+
+
+def test_korb_verarbeiten_ohne_datei_gibt_404(tmp_path, monkeypatch):
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    r = client.post("/api/korb/gibtsnicht.pdf/verarbeiten", json={})
+    assert r.status_code == 404
+
+
+def test_korb_verarbeiten_mit_traversal_wird_abgewiesen(tmp_path, monkeypatch):
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    r = client.post("/api/korb/..%2F..%2Fetc%2Fpasswd/verarbeiten", json={})
+    assert r.status_code == 404
+
+
+def test_korb_verarbeiten_mit_inaktivem_ziel_scheitert(tmp_path, monkeypatch):
+    ziel = _ziel(id="z1", pfad="rechnungen")
+    ziel["aktiv"] = False
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch, [ziel])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post("/api/korb/scan.pdf/verarbeiten", json={"ziel_id": "z1"})
+    assert r.status_code == 400
+    # Bei einem Fehler bleibt das Original im Korb.
+    assert (korb / "scan.pdf").exists()
+
+
+def test_korb_loeschen_verschiebt_nach_erledigt(tmp_path, monkeypatch):
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.delete("/api/korb/scan.pdf")
+    assert r.get_json()["ok"] is True
+    assert not (korb / "scan.pdf").exists()
+    assert (korb / "erledigt" / "scan.pdf").exists()
+
+
+def test_korb_erledigt_ueberschreibt_nichts(tmp_path, monkeypatch):
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    for inhalt in (b"erste", b"zweite"):
+        (korb / "scan.pdf").write_bytes(inhalt)
+        assert client.delete("/api/korb/scan.pdf").get_json()["ok"] is True
+
+    dateien = sorted(p.name for p in (korb / "erledigt").iterdir())
+    assert dateien == ["scan (2).pdf", "scan.pdf"]
+
+
+def test_output_filename_ohne_absender_und_typ():
+    """Ohne KI-Angaben entsteht kein Name mit doppelten Trennstrichen."""
+    r = pipeline.output_filename(
+        {"datum": "2026-11-08", "absender": None, "dokumenttyp": None}, "scan.pdf"
+    )
+    assert r == "2026-11-08 – scan.pdf"
+
+    r2 = pipeline.output_filename(
+        {"datum": "2026-11-08", "absender": None, "dokumenttyp": None}
+    )
+    assert r2 == "2026-11-08.pdf"
+
+
+# ---------------------------------------------------------------------------
+# Geführter Ablauf: Upload in den Korb und Vorschlag ohne Ablegen
+# ---------------------------------------------------------------------------
+
+
+def test_upload_ablage_legt_nur_in_den_korb(tmp_path, monkeypatch):
+    """Hochladen verarbeitet nicht, sondern legt die Datei in den Korb."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch)
+
+    r = client.post(
+        "/api/upload-ablage",
+        data={"file": (io.BytesIO(_sample_pdf_bytes()), "neu.pdf")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["name"] == "neu.pdf"
+
+    assert (korb / "neu.pdf").exists()
+    # Nichts wurde verarbeitet.
+    assert not (data_dir / "archiv.log").exists()
+    assert not list((data_dir.parent / "ablage").rglob("*.pdf"))
+
+
+def test_upload_ablage_ueberschreibt_nicht(tmp_path, monkeypatch):
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch)
+    for _ in range(2):
+        client.post(
+            "/api/upload-ablage",
+            data={"file": (io.BytesIO(_sample_pdf_bytes()), "gleich.pdf")},
+            content_type="multipart/form-data",
+        )
+    namen = sorted(p.name for p in korb.iterdir() if p.is_file())
+    assert namen == ["gleich (2).pdf", "gleich.pdf"]
+
+
+def test_upload_ablage_weist_falsche_endung_ab(tmp_path, monkeypatch):
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    r = client.post(
+        "/api/upload-ablage",
+        data={"file": (io.BytesIO(b"x"), "boese.exe")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 400
+
+
+def test_vorschlag_legt_nichts_ab(tmp_path, monkeypatch):
+    """Der Vorschlag darf nur analysieren, nie ablegen."""
+    ziel = _ziel(id="z1", pfad="rechnungen")
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [ziel])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post("/api/korb/scan.pdf/vorschlag")
+    body = r.get_json()
+    assert r.status_code == 200, body
+    assert body["ok"] is True
+
+    # Datei ist noch im Korb, nichts im Archiv, kein Log.
+    assert (korb / "scan.pdf").exists()
+    assert not list((data_dir.parent / "ablage").rglob("*.pdf"))
+    assert not (data_dir / "archiv.log").exists()
+
+
+def test_vorschlag_ohne_ziele_meldet_fehler(tmp_path, monkeypatch):
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post("/api/korb/scan.pdf/vorschlag")
+    assert r.status_code == 400
+    assert "Ziel" in r.get_json()["error"]
+
+
+def test_vorschlag_fuer_unbekannte_datei_gibt_404(tmp_path, monkeypatch):
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    assert client.post("/api/korb/nix.pdf/vorschlag").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Schritt 1: Wege "Scannen" und "Hochladen"
+# ---------------------------------------------------------------------------
+
+
+def test_startseite_zeigt_beide_wege(tmp_path, monkeypatch):
+    client, _data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    html = client.get("/").get_data(as_text=True)
+    assert "Scannen" in html
+    assert "Datei hochladen" in html
+    # Die Anleitung für "Digitale Bilder" muss sichtbar sein.
+    assert "68-archiv-hub-scannen.command" in html
+    assert "300 dpi" in html
+    assert "OCR" in html
+
+
+def test_korb_api_liefert_host_pfad(tmp_path, monkeypatch):
+    import app.app as appmod
+
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        appmod.config, "korb_host_pfad", lambda: "/Volumes/OWC 8TB/test/input"
+    )
+    r = client.get("/api/korb").get_json()
+    assert r["host_pfad"] == "/Volumes/OWC 8TB/test/input"
+
+
+def test_korb_host_pfad_leer_ohne_env(monkeypatch):
+    """Ohne Env-Variable bleibt der Host-Pfad leer (kein Finder-Link)."""
+    import app.config as config
+
+    monkeypatch.delenv("ARCHIV_HUB_KORB_HOST_PFAD", raising=False)
+    assert config.korb_host_pfad() == ""
+
+
+def test_korb_host_pfad_aus_env(monkeypatch):
+    import app.config as config
+
+    monkeypatch.setenv("ARCHIV_HUB_KORB_HOST_PFAD", "/tmp/korb-test")
+    assert config.korb_host_pfad() == "/tmp/korb-test"
+
+
+def test_scannskript_existiert_und_ist_syntaxkorrekt():
+    """Skript 68 muss vorhanden und syntaktisch gültig sein."""
+    import subprocess
+
+    skript = (
+        PROJECT_DIR.parent.parent
+        / "tools"
+        / "start-stop"
+        / "6-archiv-hub"
+        / "68-archiv-hub-scannen.command"
+    )
+    if not skript.is_file():
+        pytest.skip("Skript 68 liegt ausserhalb dieses Repositories")
+    r = subprocess.run(["bash", "-n", str(skript)], capture_output=True)
+    assert r.returncode == 0, r.stderr.decode()
+
+
+def test_scannskript_oeffnet_digitale_bilder():
+    skript = (
+        PROJECT_DIR.parent.parent
+        / "tools"
+        / "start-stop"
+        / "6-archiv-hub"
+        / "68-archiv-hub-scannen.command"
+    )
+    if not skript.is_file():
+        pytest.skip("Skript 68 liegt ausserhalb dieses Repositories")
+    inhalt = skript.read_text(encoding="utf-8")
+    assert "Image Capture" in inhalt
+    assert "data/input" in inhalt
+
+
+# ---------------------------------------------------------------------------
+# Sichtbarkeit: das hidden-Attribut muss greifen
+# ---------------------------------------------------------------------------
+
+
+def test_css_erzwingt_hidden():
+    """Ohne [hidden]{display:none} bleiben Buttons mit display:inline-flex
+    trotz hidden sichtbar – genau dieser Fehler ist schon einmal aufgetreten."""
+    css = (PROJECT_DIR / "app" / "static" / "archiv.css").read_text(encoding="utf-8")
+    assert re.search(r"\[hidden\]\s*\{[^}]*display:\s*none", css), (
+        "CSS muss [hidden] { display: none !important; } enthalten"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ziele: Wurzelordner und klare Fehlermeldungen
+# ---------------------------------------------------------------------------
+
+
+def test_ziel_ohne_pfad_ist_erlaubt(tmp_path, monkeypatch):
+    """Ein leerer Pfad bedeutet: direkt im Wurzelordner des Speicherorts."""
+    client, _data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    r = client.post("/api/ziele", json={"name": "Direkt", "speicherort": "standard"})
+    assert r.status_code == 200, r.get_json()
+    # Ohne Pfad wird kein pfad-Feld gesetzt; gelesen wird es als leerer String.
+    assert not r.get_json()["ziel"].get("pfad")
+
+
+def test_ziel_ohne_namen_wird_abgelehnt(tmp_path, monkeypatch):
+    client, _data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    r = client.post("/api/ziele", json={"pfad": "irgendwas"})
+    assert r.status_code == 400
+    assert "Name" in r.get_json()["error"]
+
+
+def test_ziel_mit_unbekanntem_speicherort_nennt_den_namen(tmp_path, monkeypatch):
+    client, _data_dir, _ablage = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    r = client.post(
+        "/api/ziele", json={"name": "X", "speicherort": "gibtsnicht"}
+    )
+    assert r.status_code == 400
+    assert "gibtsnicht" in r.get_json()["error"]
+
+
+def test_ziel_im_wurzelordner_legt_dort_ab(tmp_path, monkeypatch):
+    """Ein Ziel ohne Pfad legt Dokumente direkt im Speicherort ab."""
+    import app.app as appmod
+
+    client, data_dir, ablage_dir = _client_with_tmp_dirs(
+        tmp_path, monkeypatch, None, []
+    )
+    monkeypatch.setattr(appmod.config, "INPUT_DIR", data_dir / "input")
+    (data_dir / "input").mkdir(parents=True, exist_ok=True)
+
+    def fake_ocr(src, work):
+        aus = work / "out.pdf"
+        aus.write_bytes(b"%PDF")
+        return aus, "text"
+
+    monkeypatch.setattr(appmod.ocr, "process", fake_ocr)
+
+    r = client.post("/api/ziele", json={"name": "Direkt", "speicherort": "standard"})
+    ziel_id = r.get_json()["ziel"]["id"]
+
+    (data_dir / "input" / "s.pdf").write_bytes(b"%PDF")
+    r2 = client.post("/api/korb/s.pdf/verarbeiten", json={"ziel_id": ziel_id})
+    assert r2.status_code == 200, r2.get_json()
+    # Die Datei liegt direkt unter /ablage/standard, nicht in einem Unterordner.
+    treffer = list((ablage_dir / "standard").glob("*.pdf"))
+    assert treffer, "Datei nicht im Wurzelordner abgelegt"
+
+
+# ---------------------------------------------------------------------------
+# Direktes Ablegen in einen Ordner (ohne vorher ein Ziel anzulegen)
+# ---------------------------------------------------------------------------
+
+
+def test_direkt_ablegen_ohne_ziel(tmp_path, monkeypatch):
+    """Der Kern der Vereinfachung: Ordner wählen, ablegen - ohne Ziel-Umweg."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF original")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={"speicherort": "standard", "pfad": ""},
+    )
+    body = r.get_json()
+    assert r.status_code == 200, body
+    assert body["status"] == "abgelegt"
+
+    # Im Wurzelordner des Speicherorts liegt jetzt ein PDF.
+    treffer = list((data_dir.parent / "ablage" / "standard").glob("*.pdf"))
+    assert len(treffer) == 1
+    # Und das Original ist nicht gelöscht.
+    assert (korb / "erledigt" / "scan.pdf").exists()
+
+
+def test_direkt_ablegen_in_unterordner(tmp_path, monkeypatch):
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={"speicherort": "standard", "pfad": "Rechnungen"},
+    )
+    assert r.status_code == 200, r.get_json()
+    treffer = list((data_dir.parent / "ablage" / "standard" / "Rechnungen").glob("*.pdf"))
+    assert len(treffer) == 1
+
+
+def test_direkt_ablegen_legt_neuen_unterordner_an(tmp_path, monkeypatch):
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={"speicherort": "standard", "pfad": "", "unterordner": "Neu"},
+    )
+    assert r.status_code == 200, r.get_json()
+    assert (data_dir.parent / "ablage" / "standard" / "Neu").is_dir()
+
+
+def test_direkt_ablegen_weist_traversal_ab(tmp_path, monkeypatch):
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={"speicherort": "standard", "pfad": "../../etc"},
+    )
+    assert r.status_code == 400
+
+
+def test_ordner_liste_liefert_alle_speicherorte(tmp_path, monkeypatch):
+    client, _data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    r = client.get("/api/ablage/ordner-liste")
+    body = r.get_json()
+    assert body["ok"] is True
+    assert any(s["speicherort"] == "standard" for s in body["speicherorte"])
+    eintrag = [s for s in body["speicherorte"] if s["speicherort"] == "standard"][0]
+    assert "host_pfad" in eintrag
+    assert isinstance(eintrag["ordner"], list)

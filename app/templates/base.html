@@ -18,9 +18,6 @@
       </a>
       <nav class="main-nav" id="main-nav">
         <a href="{{ url_for('index') }}" class="{{ 'active' if active == 'index' }}">Start</a>
-        <a href="{{ url_for('scan_page') }}" class="{{ 'active' if active == 'scan' }}">Scannen</a>
-        <a href="{{ url_for('ziele_page') }}" class="{{ 'active' if active == 'ziele' }}">Ziele</a>
-        <a href="/#zur-pruefung">Zur Prüfung</a>
         <button type="button" class="btn btn-logout" onclick="archivLogout()">Abmelden</button>
       </nav>
     </div>

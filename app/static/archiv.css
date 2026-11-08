@@ -692,3 +692,316 @@ ul.pruef-liste li {
     font-size: 1.4rem;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Geführter Ablauf (Startseite)
+   Schritt 1 Material einfügen · Schritt 2 Ablageort · Schritt 3 Ablegen
+   --------------------------------------------------------------------------- */
+
+.intro {
+  color: var(--muted);
+  margin: 0 0 18px;
+}
+
+.schritt {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.schritt h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+  color: var(--navy);
+}
+
+.schritt-nr {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  font-size: 0.85rem;
+  flex: 0 0 auto;
+}
+
+.zeile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.btn-klein {
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+.btn-still {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.korb {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.korb-kopf {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.korb-kopf .btn-klein {
+  margin-left: auto;
+}
+
+.hint {
+  margin: 6px 0 10px;
+}
+
+.korb-liste,
+.pruef-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.korb-eintrag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Name nimmt den freien Platz, die Knöpfe bleiben rechts. Metadaten
+   rutschen in eine eigene Zeile darunter. */
+.korb-eintrag .korb-meta {
+  flex: 1 1 100%;
+  order: 3;
+  margin-top: -4px;
+}
+
+.korb-eintrag .korb-name {
+  flex: 1 1 auto;
+}
+
+.korb-eintrag .btn {
+  flex: 0 0 auto;
+}
+
+.korb-eintrag:last-child {
+  border-bottom: 0;
+}
+
+.vorschlag {
+  background: var(--navy-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 10px 0;
+}
+
+.vorschlag .klein {
+  word-break: break-all;
+}
+
+#ziel-auswahl {
+  margin: 12px 0;
+}
+
+#ziel-auswahl label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+}
+
+#ziel-wahl {
+  width: 100%;
+  max-width: 420px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.msg:empty {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .korb-eintrag {
+    grid-template-columns: 1fr auto;
+  }
+}
+
+/* Titel der Karte "Zur Prüfung": gleiche Größe wie die Schritt-Titel,
+   damit die Startseite ruhig wirkt. */
+.card h2.karte-titel {
+  font-size: 1.1rem;
+  color: var(--navy);
+}
+
+/* Zwei Wege in Schritt 1: Scannen und Hochladen */
+.wege {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+
+.weg {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.weg h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  color: var(--navy);
+}
+
+.weg .zeile {
+  margin-bottom: 0;
+}
+
+.scan-hilfe {
+  margin-top: 8px;
+}
+
+.scan-hilfe summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: 0.9rem;
+}
+
+.scan-hilfe ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 720px) {
+  .wege {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Dateiname des Scan-Skripts: gut sichtbar, zum Nachschlagen */
+.skript-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  background: var(--navy-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 4px 0 10px;
+  word-break: break-all;
+}
+
+/* Link, der wie ein Knopf aussieht (z. B. "Ziele anlegen") */
+a.btn {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Das hidden-Attribut muss jedes display der Komponenten-Klassen schlagen.
+   Ohne diese Regel bleiben .btn und andere Elemente mit display:inline-flex
+   trotz hidden sichtbar. */
+[hidden] {
+  display: none !important;
+}
+
+/* Deutliche Anzeige, ob ein Ablageordner gewählt ist */
+.gewaehlt {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.gewaehlt.ok {
+  background: var(--green-soft);
+  color: var(--green-ink);
+  border: 1px solid var(--green);
+}
+
+.gewaehlt.fehlt {
+  background: var(--yellow-soft);
+  border: 1px solid var(--yellow);
+}
+
+/* Zeile "Neuen Ordner anlegen" */
+.neuer-ordner-zeile {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: -6px 0 10px;
+}
+
+.neuer-ordner-zeile input {
+  flex: 1 1 auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.neuer-ordner-zeile .btn {
+  flex: 0 0 auto;
+}
+
+#ordner-wahl {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+/* Ablageort-Auswahl in Schritt 2 (alles auf einer Seite) */
+.ablage-wahl {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 12px 0;
+  background: var(--navy-soft);
+}
+
+.ablage-wahl label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.ablage-wahl select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  margin-bottom: 10px;
+}
+
+.ablage-wahl .host-pfad {
+  margin: 4px 0 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}

@@ -217,6 +217,71 @@ def api_scanner():
     return jsonify({"ok": True, "scanner": [q.to_dict() for q in scanner.load_scanner()]})
 
 
+# ---------------------------------------------------------------------------
+# Eingangskorb
+#
+# Dateien im Eingangskorb (data/input) werden NICHT automatisch verarbeitet.
+# Der Nutzer sieht sie in der Oberfläche, prüft sie und stösst die Verarbeitung
+# einzeln an. Nach erfolgreicher Ablage wandert das Original nach
+# data/input/erledigt/ – es wird nie gelöscht (siehe storage.korb_erledigt).
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/upload-ablage", methods=["POST"])
+def upload_ablage():
+    """Legt eine hochgeladene Datei NUR in den Eingangskorb.
+
+    Verarbeitet nichts: der Nutzer prüft die Datei erst in der Oberfläche und
+    stösst die Verarbeitung dann selbst an. Damit verhält sich ein Upload wie
+    ein Scan, der in data/input abgelegt wird.
+    """
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "Keine Datei übergeben."}), 400
+
+    file = request.files["file"]
+    if not file or not file.filename:
+        return jsonify({"ok": False, "error": "Leere Datei."}), 400
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        return jsonify({"ok": False, "error": "Nicht unterstütztes Dateiformat."}), 400
+
+    original_name = Path(file.filename).name
+    input_dir = config.INPUT_DIR
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    # Namen erhalten, aber nie ueberschreiben.
+    ziel = input_dir / original_name
+    zaehler = 2
+    while ziel.exists():
+        ziel = input_dir / f"{Path(original_name).stem} ({zaehler}){suffix}"
+        zaehler += 1
+
+    file.save(ziel)
+    return jsonify({"ok": True, "name": ziel.name})
+
+
+@app.route("/api/korb", methods=["GET"])
+def api_korb():
+    return jsonify(
+        {
+            "ok": True,
+            "dateien": storage.list_korb(),
+            # Host-Pfad nur zur Anzeige / für den Finder-Link auf dem Mac.
+            "host_pfad": config.korb_host_pfad(),
+        }
+    )
+
+
+@app.route("/api/korb/<path:name>", methods=["DELETE"])
+def api_korb_loeschen(name):
+    """Entfernt eine Datei aus dem Korb (nach data/input/erledigt)."""
+    ziel = storage.korb_erledigt(name)
+    if ziel is None:
+        return jsonify({"ok": False, "error": "Datei nicht gefunden."}), 404
+    return jsonify({"ok": True, "verschoben_nach": str(ziel)})
+
+
 @app.route("/api/zur-pruefung")
 def api_zur_pruefung():
     files = []
@@ -244,11 +309,21 @@ def api_ziele():
 
     data = request.get_json(silent=True) or {}
     ziel = _normalize_ziel(data)
-    if not ziel.get("name") or not ziel.get("pfad"):
-        return jsonify({"ok": False, "error": "Name und Pfad sind Pflicht."}), 400
+    # Nur der Name ist Pflicht. Ein leerer Pfad ist zulässig und bedeutet
+    # "direkt im Wurzelordner des Speicherorts".
+    if not ziel.get("name"):
+        return jsonify({"ok": False, "error": "Name fehlt."}), 400
     speicherort = ziel.get("speicherort") or "standard"
     if not storage.is_known_speicherort(speicherort):
-        return jsonify({"ok": False, "error": "Unbekannter Speicherort."}), 400
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Unbekannter Speicherort: {speicherort!r}.",
+                }
+            ),
+            400,
+        )
     ziel["speicherort"] = speicherort
 
     ziele = storage.load_ziele()
@@ -308,6 +383,104 @@ def api_ablage_ordner():
     return jsonify({"ok": True})
 
 
+@app.route("/api/ablage/ordner-liste")
+def api_ablage_ordner_liste():
+    """Alle Ordner aller Speicherorte - für die Auswahl auf der Startseite.
+
+    Liefert je Speicherort die Ordner der obersten Ebene. Damit lässt sich ein
+    Ablageort ohne Umweg über eine Verwaltungsseite wählen.
+    """
+    ergebnis = []
+    for loc in storage.locations():
+        name = loc.get("name")
+        try:
+            ordner, _mehr = storage.list_folders(name, "")
+        except (ValueError, OSError):
+            ordner = []
+        ergebnis.append(
+            {
+                "speicherort": name,
+                "label": loc.get("label") or name,
+                "host_pfad": loc.get("host_pfad") or "",
+                "ordner": ordner,
+            }
+        )
+    return jsonify({"ok": True, "speicherorte": ergebnis})
+
+
+@app.route("/api/korb/<path:name>/ablegen", methods=["POST"])
+def api_korb_ablegen(name):
+    """Legt eine Korb-Datei direkt in einen Ordner ab.
+
+    JSON: {"speicherort": "...", "pfad": "...", "unterordner": "..."}
+    Der Unterordner wird bei Bedarf angelegt. Es ist KEIN vorher angelegtes
+    Ziel nötig - der Ablageort wird direkt bestimmt.
+    """
+    quelle = storage.korb_datei(name)
+    if quelle is None:
+        return jsonify({"ok": False, "error": "Datei nicht gefunden."}), 404
+
+    data = request.get_json(silent=True) or {}
+    speicherort = str(data.get("speicherort") or "").strip()
+    pfad = str(data.get("pfad") or "").strip()
+    unterordner = str(data.get("unterordner") or "").strip()
+
+    if not storage.is_known_speicherort(speicherort):
+        return jsonify({"ok": False, "error": "Unbekannter Speicherort."}), 400
+
+    # Neuen Unterordner bei Bedarf anlegen.
+    if unterordner:
+        try:
+            storage.create_folder(speicherort, pfad, unterordner)
+        except ValueError as exc:
+            return (
+                jsonify({"ok": False, "error": f"Ordner: {exc}"}),
+                400,
+            )
+        pfad = str(Path(pfad) / unterordner) if pfad else unterordner
+
+    try:
+        ziel_ordner = storage.safe_ablage_path(speicherort, pfad)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    work_dir = DATA_DIR / "work" / secrets.token_hex(8)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        try:
+            searchable_pdf, _text = ocr.process(quelle, work_dir)
+        except Exception as exc:  # noqa: BLE001
+            return (
+                jsonify({"ok": False, "error": f"Texterkennung fehlgeschlagen: {exc}"}),
+                500,
+            )
+
+        ziel_ordner.mkdir(parents=True, exist_ok=True)
+        # Dateiname: Datum + bisheriger Name, damit nichts überschrieben wird.
+        stamm = Path(quelle.name).stem
+        datum = datetime.now().strftime("%Y-%m-%d")
+        dateiname = f"{datum} – {stamm}.pdf"
+        ziel = pipeline.unique_destination(ziel_ordner, dateiname)
+        shutil.move(str(searchable_pdf), str(ziel))
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+    # Original nach erledigt/ (es wird nie gelöscht).
+    storage.korb_erledigt(quelle.name)
+
+    pipeline.append_log(
+        LOG_PATH,
+        {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "original_filename": quelle.name,
+            "status": "abgelegt",
+            "ziel": str(ziel),
+            "grund": None,
+        },
+    )
+    return jsonify({"ok": True, "status": "abgelegt", "ziel": str(ziel)})
+
+
 def _normalize_ziel(payload, existing=None):
     ziel = dict(existing or {})
     if "name" in payload:
@@ -362,18 +535,135 @@ def upload():
     staged = input_dir / f"{token}{suffix}"
     file.save(staged)
 
+    response, status = _verarbeite_datei(staged, original_name)
+    # Der Eingangskorb behält Uploads nicht: die Datei ist nur zum Verarbeiten
+    # hierher kopiert worden. Korb-Dateien werden dagegen nach erledigt/
+    # verschoben (siehe api_korb_verarbeiten).
+    staged.unlink(missing_ok=True)
+    return jsonify(response), status
+
+
+@app.route("/api/korb/<path:name>/vorschlag", methods=["POST"])
+def api_korb_vorschlag(name):
+    """Analysiert eine Korb-Datei und schlägt einen Ablageort vor.
+
+    Legt NICHTS ab: führt nur OCR und Klassifizierung aus und liefert das
+    Ergebnis zurück, damit der Nutzer es prüfen und bestätigen kann.
+    """
+    quelle = storage.korb_datei(name)
+    if quelle is None:
+        return jsonify({"ok": False, "error": "Datei nicht gefunden."}), 404
+
+    ziele = storage.active_targets()
+    if not ziele:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Keine aktiven Ziele angelegt. Bitte zuerst ein Ziel anlegen.",
+            }
+        ), 400
+
+    work_dir = DATA_DIR / "work" / secrets.token_hex(8)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        try:
+            _searchable_pdf, text = ocr.process(quelle, work_dir)
+        except Exception as exc:  # noqa: BLE001
+            return (
+                jsonify({"ok": False, "error": f"Texterkennung fehlgeschlagen: {exc}"}),
+                500,
+            )
+
+        try:
+            result = classifier.classify(text, ziele)
+        except Exception as exc:  # noqa: BLE001
+            return (
+                jsonify(
+                    {"ok": False, "error": f"Klassifizierung fehlgeschlagen: {exc}"}
+                ),
+                502,
+            )
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+    ziel_id = (result or {}).get("ziel_id")
+    ziel = storage.find_active_target(ziel_id)
+    unsicher = pipeline.should_review(result, config.CONFIDENCE_THRESHOLD)
+
+    vorschlag = None
+    if ziel is not None and not unsicher:
+        try:
+            ordner = storage.ziel_directory(ziel, result.get("datum"))
+        except ValueError:
+            ziel = None
+
+    if ziel is not None and not unsicher:
+        vorschlag = {
+            "ziel_id": ziel.get("id"),
+            "ziel_name": ziel.get("name"),
+            "speicherort": ziel.get("speicherort"),
+            "ordner": str(ordner),
+            "dateiname": pipeline.output_filename(result, quelle.name),
+            "absender": result.get("absender"),
+            "dokumenttyp": result.get("dokumenttyp"),
+            "datum": result.get("datum"),
+            "sicherheit": result.get("sicherheit"),
+        }
+
+    return jsonify(
+        {
+            "ok": True,
+            "vorschlag": vorschlag,
+            "unsicher": bool(unsicher),
+            "ziel_id": ziel_id,
+            "sicherheit": (result or {}).get("sicherheit"),
+        }
+    )
+
+
+@app.route("/api/korb/<path:name>/verarbeiten", methods=["POST"])
+def api_korb_verarbeiten(name):
+    """Verarbeitet eine Datei aus dem Eingangskorb.
+
+    Optional kann ein Ziel vorgegeben werden (JSON: {"ziel_id": "..."}). Dann
+    wird die KI-Klassifizierung übersprungen und direkt in dieses Ziel gelegt.
+    Ohne Vorgabe entscheidet die Klassifizierung wie beim Upload.
+    """
+    quelle = storage.korb_datei(name)
+    if quelle is None:
+        return jsonify({"ok": False, "error": "Datei nicht gefunden."}), 404
+
+    vorgabe = None
+    if request.is_json:
+        vorgabe = (request.get_json(silent=True) or {}).get("ziel_id") or None
+
+    response, status = _verarbeite_datei(quelle, quelle.name, ziel_id_vorgabe=vorgabe)
+
+    # Variante C: das Original wird nie gelöscht, sondern nach erledigt/
+    # verschoben – und zwar nur, wenn die Verarbeitung erfolgreich war.
+    if status == 200 and response.get("ok"):
+        storage.korb_erledigt(quelle.name)
+
+    return jsonify(response), status
+
+
+def _verarbeite_datei(staged, original_name, ziel_id_vorgabe=None):
+    """OCR, Klassifizierung und Ablage einer bereits vorliegenden Datei.
+
+    Liefert (response_dict, http_status). Der Aufrufer ist dafür
+    verantwortlich, die Quelldatei zu entfernen bzw. wegzulegen.
+    """
+    suffix = staged.suffix.lower()
+    token = secrets.token_hex(8)
     work_dir = DATA_DIR / "work" / token
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    searchable_pdf = None
     try:
         try:
             searchable_pdf, text = ocr.process(staged, work_dir)
         except Exception as exc:  # noqa: BLE001
-            staged.unlink(missing_ok=True)
-            shutil.rmtree(work_dir, ignore_errors=True)
             return (
-                jsonify({"ok": False, "error": f"Texterkennung fehlgeschlagen: {exc}"}),
+                {"ok": False, "error": f"Texterkennung fehlgeschlagen: {exc}"},
                 500,
             )
 
@@ -381,7 +671,23 @@ def upload():
 
         result = None
         error = None
-        if not ziele:
+        if ziel_id_vorgabe:
+            # Vom Nutzer vorgegebenes Ziel: keine KI nötig. Datum/Absender
+            # bleiben leer, der Dateiname wird entsprechend schlicht.
+            ziel = storage.find_active_target(ziel_id_vorgabe)
+            if ziel is None:
+                return (
+                    {"ok": False, "error": "Das gewählte Ziel ist nicht aktiv."},
+                    400,
+                )
+            result = {
+                "ziel_id": ziel_id_vorgabe,
+                "datum": datetime.now().strftime("%Y-%m-%d"),
+                "absender": None,
+                "dokumenttyp": None,
+                "sicherheit": None,
+            }
+        elif not ziele:
             error = "Keine aktiven Ziele angelegt."
         else:
             try:
@@ -400,8 +706,9 @@ def upload():
 
         ziel = None
         unbekannter_speicherort = None
-        if result is not None and not pipeline.should_review(
-            result, config.CONFIDENCE_THRESHOLD
+        if result is not None and (
+            ziel_id_vorgabe
+            or not pipeline.should_review(result, config.CONFIDENCE_THRESHOLD)
         ):
             ziel = storage.find_active_target(result.get("ziel_id"))
             if ziel is not None and not storage.is_known_speicherort(
@@ -431,7 +738,7 @@ def upload():
         else:
             directory = storage.ziel_directory(ziel, result.get("datum"))
             directory.mkdir(parents=True, exist_ok=True)
-            filename = pipeline.output_filename(result)
+            filename = pipeline.output_filename(result, original_name)
             destination = pipeline.unique_destination(directory, filename)
             shutil.move(str(searchable_pdf), str(destination))
             entry.update(_classification_fields(result))
@@ -452,9 +759,8 @@ def upload():
             response["absender"] = result.get("absender")
             response["datum"] = result.get("datum")
             response["ziel_id"] = result.get("ziel_id")
-        return jsonify(response)
+        return response, 200
     finally:
-        staged.unlink(missing_ok=True)
         shutil.rmtree(work_dir, ignore_errors=True)
 
 

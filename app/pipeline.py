@@ -56,12 +56,26 @@ def should_review(result, threshold):
     return float(result["sicherheit"]) < threshold
 
 
-def output_filename(result):
-    """Baut "YYYY-MM-DD – Absender – Dokumenttyp.pdf"."""
+def output_filename(result, original_name=None):
+    """Baut "YYYY-MM-DD – Absender – Dokumenttyp.pdf".
+
+    Sind Absender und Dokumenttyp leer (z. B. wenn der Ablageort manuell
+    gewählt wurde und keine KI beteiligt war), wird der Originaldateiname
+    verwendet, damit kein Name wie "2026-11-08 –  – .pdf" entsteht.
+    """
     datum = str(result["datum"]).strip()
     absender = str(result.get("absender") or "").strip()
     dokumenttyp = str(result.get("dokumenttyp") or "").strip()
-    return f"{datum} – {absender} – {dokumenttyp}.pdf"
+
+    if not absender and not dokumenttyp:
+        if original_name:
+            stem = Path(str(original_name)).stem.strip()
+            if stem:
+                return f"{datum} – {stem}.pdf"
+        return f"{datum}.pdf"
+
+    teile = [datum, absender or "Unbekannt", dokumenttyp or "Dokument"]
+    return " – ".join(teile) + ".pdf"
 
 
 def unique_destination(directory, filename):
