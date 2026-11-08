@@ -59,7 +59,7 @@ INPUT_DIR = Path(
 # "standard" wird per ARCHIV_HUB_ABLAGE_BASIS in compose.yaml gesetzt und hier
 # nur zur Anzeige in den Container gereicht. Der absolute Pfad kommt als
 # ARCHIV_HUB_ABLAGE_BASIS_ANZEIGE vom Startskript 60 bzw. deploy-synology.sh.
-ABLAGE_BASIS = Path(os.environ.get("ARCHIV_HUB_ABLAGE_PATH", "/ablage"))
+ABLAGE_BASIS = Path(os.environ.get("ARCHIV_HUB_ABLAGE_BASIS", "/ablage"))
 
 
 def standard_host_pfad():

@@ -1,6 +1,5 @@
 # Einstellungen der Archiv-Hub-Pipeline.
 llm:
-  provider: deepseek
   model: deepseek-v4-pro
   base_url: https://api.deepseek.com
 

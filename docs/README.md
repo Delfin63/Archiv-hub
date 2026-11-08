@@ -7,7 +7,7 @@
 - `app/ocr.py` – OCRmyPDF/Tesseract (deu+eng)
 - `app/pipeline.py` – Ablage-Prüfung, Dateiname, Konflikte, Log
 - `app/storage.py` – Ziele (`data/ziele.json`), Speicherorte, Pfadsicherheit unter `/ablage`
-- `app/ui.py` – HTML-Seiten (Anmeldung, Start, Zielverwaltung)
+- `app/scanner.py` – Scan-Quellen (`data/scanner.json`)
 - `app/config.py` – lädt `config/*.yaml` und `.env`
 - `app/config/hubs.yaml` – optionale Gruppierung der Hubs (Name + Beschreibung)
 - `app/config/settings.yaml` – LLM, Schwelle, Eingangsordner
