@@ -110,7 +110,8 @@ echo "Übertrage Tag zu GitHub ..."
 git push origin "$TAG"
 
 echo "Erstelle Release-Sicherung ..."
-mkdir "$RELEASE_DIR"
+# -p: der Hub-Ordner unter releases/ existiert beim ersten Release noch nicht.
+mkdir -p "$RELEASE_DIR"
 git archive "$TAG" | tar -x -C "$RELEASE_DIR"
 
 SAVED="$(tr -d '[:space:]' < "$RELEASE_DIR/app/version.txt")"
