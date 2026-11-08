@@ -57,12 +57,15 @@ fail() {
 # versehentliche Änderungen (und Dateien, die .gitignore gerade noch abfängt)
 # im Produktivbetrieb. --allow-dirty übergeht die Prüfung bewusst.
 ALLOW_DIRTY=0
+ASSUME_YES=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
+    --yes|-y) ASSUME_YES=1 ;;
     -h|--help)
-      echo "Verwendung: deploy-synology.sh [--allow-dirty]"
+      echo "Verwendung: deploy-synology.sh [--allow-dirty] [--yes]"
       echo "  --allow-dirty  Deploy auch bei nicht committeten Änderungen"
+      echo "  --yes          Bestätigung überspringen (für automatisierte Läufe)"
       exit 0
       ;;
     *) fail "Unbekanntes Argument: $arg" ;;
@@ -78,6 +81,22 @@ if [[ "$ALLOW_DIRTY" -eq 0 ]]; then
     fail "Working Tree ist nicht sauber. Erst committen oder --allow-dirty verwenden."
   fi
   echo "Working Tree ist sauber ($(git rev-parse --short HEAD))."
+fi
+
+echo "Ziel auf der Synology : $SSH_TARGET:$TARGET"
+echo "Stand                 : $(git rev-parse --short HEAD) $(git log -1 --format=%s)"
+echo
+echo "ACHTUNG: Überschreibt app/ und docker/ auf der NAS und baut den"
+echo "         Container dort neu. data/ und .env bleiben unberührt."
+echo
+
+if [[ "$ASSUME_YES" -eq 0 ]]; then
+  if [[ ! -t 0 ]]; then
+    fail "Kein interaktives Terminal. Für automatisierte Läufe --yes verwenden."
+  fi
+  read -r "?Deploy auf die Synology wirklich ausführen? [j/N] "
+  [[ "$REPLY" == [jJ] ]] || fail "Vom Benutzer abgebrochen."
+  echo
 fi
 
 echo "Prüfe SSH-Verbindung zu ${SSH_TARGET} ..."
