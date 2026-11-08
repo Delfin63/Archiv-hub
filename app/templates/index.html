@@ -2,81 +2,97 @@
 {% block title %}Archiv Hub{% endblock %}
 
 {% block content %}
-<p class="intro">
-  Dokument einfügen, Ablageort prüfen, ablegen. Die Schritte erscheinen
-  nacheinander.
-</p>
+<nav class="schrittleiste" id="schrittleiste">
+  <span class="sl-punkt aktiv" data-schritt="1">1. Quelle</span>
+  <span class="sl-sep">›</span>
+  <span class="sl-punkt" data-schritt="2">2. Vorschlag</span>
+  <span class="sl-sep">›</span>
+  <span class="sl-punkt" data-schritt="3">3. Ablegen</span>
+</nav>
 
 <section class="schritt" id="schritt-1">
-  <h2><span class="schritt-nr">1</span> Material einfügen</h2>
+  <h2>Wie möchtest du ein Dokument hinzufügen?</h2>
 
   <div class="wege">
-    <div class="weg">
-      <h3>Scannen</h3>
-      <p class="klein">Dieses Skript doppelklicken – es öffnet „Digitale Bilder"
-         und zeigt den Eingangskorb:</p>
-      <p class="skript-name">68-archiv-hub-scannen.command</p>
-      <button type="button" class="btn btn-secondary btn-klein" id="korb-finder">
+    <button type="button" class="kachel" id="kachel-scan">
+      <span class="kachel-titel">Scannen</span>
+      <span class="klein">Dokument mit Scanner erfassen</span>
+    </button>
+
+    <button type="button" class="kachel" id="kachel-upload">
+      <span class="kachel-titel">Hochladen</span>
+      <span class="klein">Vorhandene Datei auswählen</span>
+    </button>
+  </div>
+
+  <div id="upload-bereich" hidden>
+    <form id="upload-form" class="zeile">
+      <input type="file" id="datei"
+             accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" required>
+      <button type="submit" class="btn btn-primary">Hochladen</button>
+    </form>
+  </div>
+
+  <div id="scan-bereich" hidden>
+    <p class="klein">
+      „Digitale Bilder" öffnet sich und der Eingangskorb wird angezeigt.
+      Scanne dort – die Datei erscheint danach hier.
+    </p>
+    <div class="zeile">
+      <button type="button" class="btn btn-secondary" id="korb-finder">
         Eingangskorb im Finder öffnen
       </button>
-      <details class="scan-hilfe">
-        <summary>Einstellungen in „Digitale Bilder"</summary>
-        <ul class="klein">
-          <li>Auflösung <strong>300 dpi</strong>, Größe <strong>A4</strong></li>
-          <li>Format <strong>PDF</strong>, <strong>OCR aus</strong> (macht der Hub)</li>
-          <li>„Scannen in" einmalig auf <code id="korb-pfad">data/input</code> stellen</li>
-        </ul>
-      </details>
+      <button type="button" class="btn btn-secondary" id="scan-skript-zeigen">
+        Wie öffne ich „Digitale Bilder"?
+      </button>
     </div>
-
-    <div class="weg">
-      <h3>Datei hochladen</h3>
+    <div id="scan-hilfe" hidden class="hilfe">
+      <p class="klein">Doppelklicke im Ordner <code>6-archiv-hub</code>:</p>
+      <p class="skript-name">68-archiv-hub-scannen.command</p>
       <p class="klein">
-        PDF oder Bild von der Festplatte. Die Datei landet zuerst im
-        Eingangskorb und wird noch nicht verarbeitet.
+        Einstellungen dort: 300 dpi, A4, PDF, OCR aus.
+        „Scannen in" einmalig auf den Eingangskorb stellen.
       </p>
-      <form id="upload-form" class="zeile">
-        <input type="file" id="datei" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" required>
-        <button type="submit" class="btn btn-primary">Hochladen</button>
-      </form>
     </div>
   </div>
 
-  <div class="korb">
+  <div class="korb kompakt">
     <div class="korb-kopf">
       <strong>Eingangskorb</strong>
       <span class="count-badge" id="korb-count">0</span>
+      <span class="klein" id="korb-hinweis">Keine offenen Dokumente</span>
       <button type="button" class="btn btn-secondary btn-klein" id="korb-neu">Aktualisieren</button>
     </div>
-    <p class="klein hint">
-      Alles, was hier liegt, wartet auf deine Kontrolle. Nichts wird
-      automatisch verarbeitet.
-    </p>
     <ul class="korb-liste" id="korb-liste"></ul>
   </div>
 </section>
 
 <section class="schritt" id="schritt-2" hidden>
-  <h2><span class="schritt-nr">2</span> Ablegen</h2>
+  <h2><span class="schritt-nr">2</span> Vorschlag prüfen</h2>
   <p class="klein" id="gewaehlte-datei"></p>
 
   <div id="vorschlag-bereich"></div>
 
   <div class="ablage-wahl">
-    <label for="wahl-speicherort">Speicherort</label>
-    <select id="wahl-speicherort"></select>
-
     <label for="wahl-ordner">Ordner</label>
     <select id="wahl-ordner"></select>
 
     <div class="neuer-ordner-zeile">
       <input type="text" id="neuer-ordner" placeholder="Neuen Ordner anlegen …">
-      <button type="button" class="btn btn-secondary" onclick="neuenOrdnerAnlegen()">
+      <button type="button" class="btn btn-secondary btn-klein" onclick="neuenOrdnerAnlegen()">
         Anlegen
       </button>
     </div>
 
+    <label for="wahl-dateiname">Dateiname</label>
+    <input type="text" id="wahl-dateiname" autocomplete="off">
+
     <div class="host-pfad" id="wahl-pfad"></div>
+
+    <details class="weitere">
+      <summary>Anderer Speicherort</summary>
+      <select id="wahl-speicherort"></select>
+    </details>
   </div>
 
   <div class="zeile">
@@ -87,11 +103,13 @@
 
 <div class="msg" id="ergebnis"></div>
 
-<section class="card" id="zur-pruefung">
-  <h2 class="karte-titel">Zur Prüfung <span class="count-badge" id="pruef-count">0</span></h2>
+<details class="card kompakt" id="zur-pruefung">
+  <summary>
+    Zur Prüfung <span class="count-badge" id="pruef-count">0</span>
+  </summary>
   <p class="klein hint">Dokumente, bei denen die Zuordnung unsicher war.</p>
   <ul class="pruef-liste" id="pruef-liste"></ul>
-</section>
+</details>
 
 <p class="klein fussnote">
   <a href="/einstellungen/ziele">Ablageorte verwalten</a>

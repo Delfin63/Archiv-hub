@@ -102,3 +102,26 @@ def append_log(log_path, entry):
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+# Zeichen, die in Dateinamen nicht vorkommen dürfen (macOS/Windows/Synology).
+_UNSAFE_NAME_CHARS = '<>:"/\\|?*\x00-\x1f'
+
+
+def safe_filename(name, fallback="Dokument.pdf"):
+    """Bereinigt einen vom Nutzer vorgegebenen Dateinamen.
+
+    Entfernt Pfadtrenner und Steuerzeichen, kürzt auf 200 Zeichen und sorgt
+    für die Endung .pdf. Ein leeres Ergebnis fällt auf ``fallback`` zurück.
+    """
+    name = str(name or "").strip()
+    # Nur den reinen Dateinamen behalten (keine Pfadanteile).
+    name = name.replace("\\", "/").split("/")[-1]
+    name = re.sub(f"[{_UNSAFE_NAME_CHARS}]", "", name)
+    name = name.strip(" .")
+    if not name:
+        return fallback
+    if not name.lower().endswith(".pdf"):
+        # Vorhandene Endung ersetzen, sonst anhängen.
+        name = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", name) + ".pdf"
+    return name[:200]

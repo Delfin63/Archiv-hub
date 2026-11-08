@@ -1015,3 +1015,148 @@ a.btn {
 .fussnote a {
   color: var(--blue);
 }
+
+/* ---------------------------------------------------------------------------
+   Neue Startseite: Schrittleiste, Kacheln, kompakte Bereiche
+   --------------------------------------------------------------------------- */
+
+.schrittleiste {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  margin: 0 0 18px;
+  font-size: 0.9rem;
+}
+
+.sl-punkt {
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.sl-punkt.aktiv {
+  background: var(--navy-soft);
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.sl-punkt.erledigt {
+  color: var(--green-ink);
+}
+
+.sl-sep {
+  color: var(--border);
+}
+
+/* Zwei grosse Kacheln als Einstieg */
+.wege {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 14px 0 18px;
+}
+
+.kachel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  text-align: center;
+  padding: 22px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.kachel:hover {
+  border-color: var(--blue);
+}
+
+.kachel.gewaehlt {
+  border-color: var(--navy);
+  background: var(--navy-soft);
+}
+
+.kachel-titel {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+/* Kompakter Korb und Prüfbereich */
+.korb.kompakt {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.korb-kopf {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.korb-kopf #korb-hinweis {
+  flex: 1 1 auto;
+}
+
+#zur-pruefung.kompakt {
+  padding: 14px 18px;
+}
+
+#zur-pruefung summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.hilfe {
+  background: var(--navy-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin: 10px 0;
+}
+
+.weitere {
+  margin-top: 10px;
+}
+
+.weitere summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: 0.9rem;
+}
+
+.weitere select {
+  margin-top: 8px;
+}
+
+#wahl-dateiname {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  margin-bottom: 8px;
+}
+
+/* Schmale Inhaltsfläche: auf grossen Bildschirmen nicht zu breit */
+.schritt,
+.msg,
+.schrittleiste,
+.fussnote {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (max-width: 600px) {
+  .wege {
+    grid-template-columns: 1fr;
+  }
+}

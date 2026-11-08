@@ -411,9 +411,11 @@ def api_ablage_ordner_liste():
 def api_korb_ablegen(name):
     """Legt eine Korb-Datei direkt in einen Ordner ab.
 
-    JSON: {"speicherort": "...", "pfad": "...", "unterordner": "..."}
+    JSON: {"speicherort": "...", "pfad": "...", "unterordner": "...",
+           "dateiname": "..."}
     Der Unterordner wird bei Bedarf angelegt. Es ist KEIN vorher angelegtes
-    Ziel nötig - der Ablageort wird direkt bestimmt.
+    Ziel nötig - der Ablageort wird direkt bestimmt. Der Dateiname ist ein
+    Vorschlag der KI und kann vom Nutzer überschrieben werden.
     """
     quelle = storage.korb_datei(name)
     if quelle is None:
@@ -423,6 +425,7 @@ def api_korb_ablegen(name):
     speicherort = str(data.get("speicherort") or "").strip()
     pfad = str(data.get("pfad") or "").strip()
     unterordner = str(data.get("unterordner") or "").strip()
+    dateiname_vorgabe = str(data.get("dateiname") or "").strip()
 
     if not storage.is_known_speicherort(speicherort):
         return jsonify({"ok": False, "error": "Unbekannter Speicherort."}), 400
@@ -455,10 +458,13 @@ def api_korb_ablegen(name):
             )
 
         ziel_ordner.mkdir(parents=True, exist_ok=True)
-        # Dateiname: Datum + bisheriger Name, damit nichts überschrieben wird.
-        stamm = Path(quelle.name).stem
-        datum = datetime.now().strftime("%Y-%m-%d")
-        dateiname = f"{datum} – {stamm}.pdf"
+        # Dateiname: Vorgabe des Nutzers (oder der KI), sonst Datum + Name.
+        if dateiname_vorgabe:
+            dateiname = pipeline.safe_filename(dateiname_vorgabe)
+        else:
+            stamm = Path(quelle.name).stem
+            datum = datetime.now().strftime("%Y-%m-%d")
+            dateiname = pipeline.safe_filename(f"{datum} – {stamm}.pdf")
         ziel = pipeline.unique_destination(ziel_ordner, dateiname)
         shutil.move(str(searchable_pdf), str(ziel))
     finally:
@@ -601,6 +607,8 @@ def api_korb_vorschlag(name):
             "ziel_id": ziel.get("id"),
             "ziel_name": ziel.get("name"),
             "speicherort": ziel.get("speicherort"),
+            # Relativer Pfad innerhalb des Speicherorts (für die Auswahlliste).
+            "pfad": str(ziel.get("pfad") or ""),
             "ordner": str(ordner),
             "dateiname": pipeline.output_filename(result, quelle.name),
             "absender": result.get("absender"),

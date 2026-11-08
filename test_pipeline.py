@@ -644,10 +644,12 @@ def test_login_flow_and_start_page(tmp_path, monkeypatch):
     response = client.get("/")
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    # Gefuehrter Ablauf: die drei Schritte sind auf der Startseite angelegt.
-    assert "Material einfügen" in html
-    assert "Ablegen" in html
+    # Ablage-Werkzeug: Quelle waehlen, Vorschlag pruefen, ablegen.
+    assert "Wie möchtest du ein Dokument hinzufügen?" in html
+    assert "Scannen" in html
+    assert "Hochladen" in html
     assert "Eingangskorb" in html
+    assert "Vorschlag prüfen" in html
     assert "Eingangskorb" in html
     assert "Zur Prüfung" in html
 
@@ -1336,11 +1338,10 @@ def test_startseite_zeigt_beide_wege(tmp_path, monkeypatch):
     )
     html = client.get("/").get_data(as_text=True)
     assert "Scannen" in html
-    assert "Datei hochladen" in html
-    # Die Anleitung für "Digitale Bilder" muss sichtbar sein.
+    assert "Hochladen" in html
+    # Der Skriptname steht hinter der Hilfe, nicht in der Hauptansicht.
     assert "68-archiv-hub-scannen.command" in html
-    assert "300 dpi" in html
-    assert "OCR" in html
+    assert "Digitale Bilder" in html
 
 
 def test_korb_api_liefert_host_pfad(tmp_path, monkeypatch):
@@ -1549,3 +1550,105 @@ def test_ordner_liste_liefert_alle_speicherorte(tmp_path, monkeypatch):
     eintrag = [s for s in body["speicherorte"] if s["speicherort"] == "standard"][0]
     assert "host_pfad" in eintrag
     assert isinstance(eintrag["ordner"], list)
+
+
+# ---------------------------------------------------------------------------
+# Dateiname: KI-Vorschlag, vom Nutzer überschreibbar
+# ---------------------------------------------------------------------------
+
+
+def test_safe_filename_bereinigt_pfadangaben():
+    """Ein eingegebener Name darf keine Pfadanteile enthalten."""
+    assert pipeline.safe_filename("../../etc/passwd") == "passwd.pdf"
+    assert pipeline.safe_filename("unter/ordner/datei.pdf") == "datei.pdf"
+    assert pipeline.safe_filename("a\\b\\c.pdf") == "c.pdf"
+
+
+def test_safe_filename_entfernt_verbotene_zeichen():
+    assert pipeline.safe_filename('Rechnung: "Muster" <2026>.pdf') == "Rechnung Muster 2026.pdf"
+    assert pipeline.safe_filename("Test|Name?.pdf") == "TestName.pdf"
+
+
+def test_safe_filename_setzt_pdf_endung():
+    assert pipeline.safe_filename("Rechnung") == "Rechnung.pdf"
+    assert pipeline.safe_filename("Rechnung.pdf") == "Rechnung.pdf"
+    assert pipeline.safe_filename("Bild.jpg") == "Bild.pdf"
+
+
+def test_safe_filename_fallback_bei_leerem_namen():
+    assert pipeline.safe_filename("") == "Dokument.pdf"
+    assert pipeline.safe_filename("   ") == "Dokument.pdf"
+    assert pipeline.safe_filename("...") == "Dokument.pdf"
+
+
+def test_safe_filename_kuerzt_lange_namen():
+    lang = "A" * 500
+    assert len(pipeline.safe_filename(lang)) <= 200
+
+
+def test_ablegen_mit_eigenem_dateinamen(tmp_path, monkeypatch):
+    """Der vom Nutzer vorgegebene Dateiname wird verwendet."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={
+            "speicherort": "standard",
+            "pfad": "",
+            "dateiname": "2026-11-08 – Muster AG – Rechnung.pdf",
+        },
+    )
+    assert r.status_code == 200, r.get_json()
+    treffer = list((data_dir.parent / "ablage" / "standard").glob("*.pdf"))
+    assert len(treffer) == 1
+    assert treffer[0].name == "2026-11-08 – Muster AG – Rechnung.pdf"
+
+
+def test_ablegen_ohne_dateiname_baut_standardnamen(tmp_path, monkeypatch):
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={"speicherort": "standard", "pfad": ""},
+    )
+    assert r.status_code == 200, r.get_json()
+    treffer = list((data_dir.parent / "ablage" / "standard").glob("*.pdf"))
+    assert treffer[0].name.startswith("20")  # Datum am Anfang
+    assert treffer[0].name.endswith(".pdf")
+
+
+def test_ablegen_mit_boesem_dateinamen_wird_entschaerft(tmp_path, monkeypatch):
+    """Ein Dateiname mit Pfadanteil darf nicht aus dem Ordner ausbrechen."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={
+            "speicherort": "standard",
+            "pfad": "",
+            "dateiname": "../../../ausserhalb.pdf",
+        },
+    )
+    assert r.status_code == 200, r.get_json()
+    # Die Datei liegt im Zielordner, nicht ausserhalb.
+    treffer = list((data_dir.parent / "ablage" / "standard").glob("*.pdf"))
+    assert len(treffer) == 1
+    assert treffer[0].name == "ausserhalb.pdf"
+
+
+def test_vorschlag_liefert_dateiname_und_pfad(tmp_path, monkeypatch):
+    """Der Vorschlag enthaelt Dateiname und Ordnerpfad zum Vorbelegen."""
+    ziel = _ziel(id="z1", pfad="rechnungen")
+    client, _data_dir, korb = _korb_client(tmp_path, monkeypatch, [ziel])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post("/api/korb/scan.pdf/vorschlag")
+    body = r.get_json()
+    assert r.status_code == 200, body
+    if body.get("vorschlag"):
+        assert "dateiname" in body["vorschlag"]
+        assert "pfad" in body["vorschlag"]
+        assert "speicherort" in body["vorschlag"]
