@@ -198,8 +198,9 @@ function pruefeScanner() {
         return;
       }
       scannerBereit = d.bereit;
+      var papier = d.papier ? " Papier im Einzug." : "";
       el.textContent = d.bereit
-        ? d.name + " ist bereit."
+        ? d.name + " ist bereit." + papier
         : d.name + ": " + d.zustand + " – bitte warten …";
       setzeKnopfZustand();
 
@@ -573,6 +574,7 @@ document.getElementById("btn-weiter").addEventListener("click", function () {
 });
 
 document.getElementById("btn-zurueck").addEventListener("click", function () {
+  document.getElementById("zeile-neu").hidden = true;
   zeigeSchritt(zielSchrittNr());
   // Zurück heisst: der Schritt ist wieder bearbeitbar.
   bereitsAbgelegt = false;
@@ -616,9 +618,36 @@ document.getElementById("btn-ablegen").addEventListener("click", function () {
       // NICHTS ausblenden: die Schritte 4 und 5 bleiben sichtbar stehen.
       zeigeSchritt(ausfuehrSchrittNr());
       setzeKnopfZustand();
+      // Statt "Ablegen"/"Zurück" jetzt der Weg zum nächsten Dokument.
+      document.getElementById("btn-ablegen").hidden = true;
+      document.getElementById("btn-zurueck").hidden = true;
+      document.getElementById("zeile-neu").hidden = false;
       loadKorb();
     })
     .catch(function (err) { zeigeErgebnis(err.message, true); });
+});
+
+// Nach dem Ablegen: zurück zum Anfang für das nächste Dokument.
+document.getElementById("btn-neue-quelle").addEventListener("click", function () {
+  // Ausgeblendete Knöpfe wieder herstellen.
+  document.getElementById("btn-ablegen").hidden = false;
+  document.getElementById("btn-zurueck").hidden = false;
+  document.getElementById("zeile-neu").hidden = true;
+
+  // Zustand zurücksetzen.
+  gewaehlt = null;
+  bereitsAbgelegt = false;
+  leereErgebnis();
+  document.getElementById("upload-bereich").hidden = true;
+  document.getElementById("scan-bereich").hidden = true;
+  document.getElementById("scan-ausfuehren").hidden = true;
+  document.getElementById("scan-einstellungen").hidden = false;
+  document.getElementById("kachel-upload").className = "kachel";
+  document.getElementById("kachel-scan").className = "kachel";
+  zeigeArbeitsbereiche(false, false);
+  zeigeSchritt(1);
+  loadKorb();
+  document.getElementById("kachel-scan").scrollIntoView({ block: "start" });
 });
 
 // --- Zur Prüfung ------------------------------------------------------------

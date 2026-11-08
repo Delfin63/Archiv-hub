@@ -47,8 +47,8 @@
 
         <label>Vorlage
           <select id="scan-quelle">
-            <option value="flachbett" selected>Flachbett (einzelne Seite)</option>
-            <option value="einzug">Einzug</option>
+            <option value="einzug" selected>Einzug</option>
+            <option value="flachbett">Flachbett (einzelne Seite)</option>
           </select>
         </label>
 
@@ -172,6 +172,13 @@
   <div class="zeile">
     <button type="button" class="btn btn-primary" id="btn-ablegen">Ablegen</button>
     <button type="button" class="btn btn-still" id="btn-zurueck">Zurück</button>
+  </div>
+
+  {# Erscheint erst nach dem Ablegen: direkt mit dem nächsten Dokument weiter. #}
+  <div class="zeile" id="zeile-neu" hidden>
+    <button type="button" class="btn btn-primary" id="btn-neue-quelle">
+      Neue Quelle
+    </button>
   </div>
 </section>
 

@@ -1673,7 +1673,7 @@ def test_escl_xml_flachbett():
     from app import scanner_escl as es
 
     xml = es._scan_einstellungen("flachbett", 300, "farbe")
-    assert "<scan:InputSource>Platen</scan:InputSource>" in xml
+    assert "<pwg:InputSource>Platen</pwg:InputSource>" in xml
     assert "<scan:XResolution>300</scan:XResolution>" in xml
     assert "<scan:ColorMode>RGB24</scan:ColorMode>" in xml
     assert "application/pdf" in xml
@@ -1683,7 +1683,8 @@ def test_escl_xml_einzug_duplex():
     from app import scanner_escl as es
 
     xml = es._scan_einstellungen("einzug", 200, "grau", duplex=True)
-    assert "<scan:InputSource>AdfDuplex</scan:InputSource>" in xml
+    assert "<pwg:InputSource>Feeder</pwg:InputSource>" in xml
+    assert "<scan:Duplex>true</scan:Duplex>" in xml
     assert "Grayscale8" in xml
     assert "200" in xml
 
@@ -2159,3 +2160,241 @@ def test_js_graut_ablegen_nach_dem_ablegen_aus():
     assert "bereitsAbgelegt = false" in umgebung, (
         "Zurück setzt den Merker nicht zurück"
     )
+
+
+def test_js_hat_neue_quelle_knopf():
+    """Nach dem Ablegen führt ein Knopf zurück zum Anfang."""
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+    html = (PROJECT_DIR / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="btn-neue-quelle"' in html, "Knopf fehlt im Template"
+    assert "btn-neue-quelle" in js, "Knopf hat keinen Handler"
+    assert 'id="zeile-neu"' in html, "Zeile für den Knopf fehlt"
+
+    # Nach dem Ablegen wird der Knopf eingeblendet.
+    stelle = js.index('"/ablegen", "POST"')
+    umgebung = js[stelle:stelle + 900]
+    assert 'zeile-neu").hidden = false' in umgebung, (
+        "Der Knopf wird nach dem Ablegen nicht eingeblendet"
+    )
+
+    # Beim Klick wird zurückgesetzt.
+    stelle2 = js.index('"btn-neue-quelle"')
+    umgebung2 = js[stelle2:stelle2 + 900]
+    assert "zeigeSchritt(1)" in umgebung2, "Zurücksetzen fehlt"
+    assert "bereitsAbgelegt = false" in umgebung2, "Merker wird nicht gelöscht"
+
+
+def test_escl_einzug_hat_feeder_anweisung():
+    """Beim Einzug wird <pwg:InputSource>Feeder</pwg:InputSource> gesendet.
+
+    Vorbild ist sane-airscan (airscan-escl.c): dort heisst die Quelle beim
+    Einzug "Feeder" – nicht "AdfSimplex". Duplex wird separat über
+    scan:Duplex mitgeteilt.
+    """
+    from app import scanner_escl as es
+
+    xml_einzug = es._scan_einstellungen("einzug", 300, "farbe")
+    assert "<pwg:InputSource>Feeder</pwg:InputSource>" in xml_einzug
+    assert "<scan:Duplex>false</scan:Duplex>" in xml_einzug
+    assert "scan:InputSource" not in xml_einzug
+
+    xml_duplex = es._scan_einstellungen("einzug", 300, "farbe", duplex=True)
+    assert "<pwg:InputSource>Feeder</pwg:InputSource>" in xml_duplex
+    assert "<scan:Duplex>true</scan:Duplex>" in xml_duplex
+
+    # Beim Flachbett gibt es keinen Einzug und kein Duplex.
+    xml_flach = es._scan_einstellungen("flachbett", 300, "farbe")
+    assert "Feeder" not in xml_flach
+    assert "Duplex" not in xml_flach
+    assert "<pwg:InputSource>Platen</pwg:InputSource>" in xml_flach
+
+
+def test_escl_quelle_ist_korrekt():
+    from app import scanner_escl as es
+
+    einzug = es._scan_einstellungen("einzug", 300, "farbe")
+    assert "<pwg:InputSource>Feeder</pwg:InputSource>" in einzug
+    duplex = es._scan_einstellungen("einzug", 300, "farbe", duplex=True)
+    assert "<scan:Duplex>true</scan:Duplex>" in duplex
+    flach = es._scan_einstellungen("flachbett", 300, "farbe")
+    assert "<pwg:InputSource>Platen</pwg:InputSource>" in flach
+
+
+def test_escl_region_in_dreihundertstel_zoll():
+    """Die Region ist immer in 1/300 Zoll – unabhängig von der Auflösung."""
+    from app import scanner_escl as es
+
+    for dpi in (100, 200, 300, 600):
+        xml = es._scan_einstellungen("einzug", dpi, "farbe")
+        assert f"<pwg:Width>{es.REGION_BREITE}</pwg:Width>" in xml
+        assert f"<pwg:Height>{es.REGION_HOEHE}</pwg:Height>" in xml
+
+
+# ---------------------------------------------------------------------------
+# Einzug: alle Seiten abholen und zu einem PDF zusammenführen
+# ---------------------------------------------------------------------------
+
+
+def _ein_seiten_pdf():
+    import io as _io
+
+    from pypdf import PdfWriter
+
+    w = PdfWriter()
+    w.add_blank_page(width=595, height=842)
+    b = _io.BytesIO()
+    w.write(b)
+    return b.getvalue()
+
+
+def test_escl_fuehrt_seiten_zusammen():
+    """Mehrere Ein-Seiten-PDFs ergeben ein PDF mit allen Seiten."""
+    import io as _io
+
+    from app import scanner_escl as es
+    from pypdf import PdfReader
+
+    seiten = [_ein_seiten_pdf() for _ in range(3)]
+    ergebnis = es._seiten_zusammenfuehren(seiten)
+
+    assert ergebnis.startswith(b"%PDF")
+    assert len(PdfReader(_io.BytesIO(ergebnis)).pages) == 3
+
+
+def test_escl_alle_seiten_holt_bis_zum_ende():
+    """_alle_seiten ruft so lange ab, bis der Scanner nichts mehr liefert."""
+    from app import scanner_escl as es
+
+    aufrufe = {"n": 0}
+
+    def fake_hole(url, timeout):
+        aufrufe["n"] += 1
+        if aufrufe["n"] <= 3:
+            return 200, _ein_seiten_pdf()
+        raise es.ScannerFehler("keine weitere Seite")
+
+    alt_hole, alt_offen = es._hole, es._seiten_offen
+    es._hole = fake_hole
+    es._seiten_offen = lambda url: False   # Auftrag ist beendet
+    try:
+        seiten = es._alle_seiten("http://test/job/NextDocument")
+    finally:
+        es._hole, es._seiten_offen = alt_hole, alt_offen
+
+    assert len(seiten) == 3, f"Erwartet 3 Seiten, bekam {len(seiten)}"
+
+
+def test_escl_alle_seiten_wiederholt_bei_offenem_auftrag():
+    """Bei offenem Auftrag wird ein Fehlversuch wiederholt (Brother-Eigenheit).
+
+    Der Brother MFC-L2980DW liefert zwischen zwei Seiten sporadisch HTTP 404,
+    obwohl noch Seiten im Einzug liegen. Der Abruf muss dann wiederholt
+    werden, statt den Auftrag abzubrechen.
+    """
+    from app import scanner_escl as es
+
+    aufrufe = {"n": 0}
+
+    def fake_hole(url, timeout):
+        aufrufe["n"] += 1
+        # Seite 1, dann zwei Fehlversuche, dann Seite 2, dann Ende.
+        if aufrufe["n"] == 1:
+            return 200, _ein_seiten_pdf()
+        if aufrufe["n"] in (2, 3):
+            raise es.ScannerFehler("HTTP 404")
+        if aufrufe["n"] == 4:
+            return 200, _ein_seiten_pdf()
+        raise es.ScannerFehler("HTTP 404")
+
+    # Auftrag gilt als offen, solange weniger als 4 Aufrufe erfolgt sind.
+    def fake_offen(url):
+        return aufrufe["n"] < 4
+
+    alt_hole, alt_offen = es._hole, es._seiten_offen
+    es._hole = fake_hole
+    es._seiten_offen = fake_offen
+    try:
+        seiten = es._alle_seiten("http://test/job/NextDocument")
+    finally:
+        es._hole, es._seiten_offen = alt_hole, alt_offen
+
+    assert len(seiten) == 2, f"Erwartet 2 Seiten trotz Fehlversuchen, bekam {len(seiten)}"
+
+
+def test_escl_alle_seiten_begrenzt_die_anzahl():
+    """Die Schleife läuft nicht endlos, wenn der Scanner immer liefert."""
+    from app import scanner_escl as es
+
+    def fake_hole(url, timeout):
+        return 200, _ein_seiten_pdf()
+
+    alt = es._hole
+    es._hole = fake_hole
+    try:
+        seiten = es._alle_seiten("http://test/job/NextDocument", max_seiten=5)
+    finally:
+        es._hole = alt
+
+    assert len(seiten) == 5
+
+
+def test_escl_wartet_auf_bereitschaft():
+    """scanne() darf nicht starten, solange ein Auftrag offen ist."""
+    from app import scanner_escl as es
+
+    # Ohne offenen Auftrag: sofort bereit.
+    alt_status, alt_offen = es.status, es._auftrag_offen
+    es.status = lambda url: {"bereit": True, "zustand": "Idle", "papier": True}
+    es._auftrag_offen = lambda url: False
+    try:
+        assert es._warte_auf_bereitschaft("http://test", max_sekunden=2) is True
+    finally:
+        es.status, es._auftrag_offen = alt_status, alt_offen
+
+
+def test_escl_wartet_nicht_endlos():
+    """Bei dauerhaft offenem Auftrag endet die Wartezeit kontrolliert."""
+    from app import scanner_escl as es
+
+    alt_status, alt_offen = es.status, es._auftrag_offen
+    es.status = lambda url: {"bereit": True, "zustand": "Idle", "papier": True}
+    es._auftrag_offen = lambda url: True   # immer offen
+    try:
+        assert es._warte_auf_bereitschaft("http://test", max_sekunden=1) is False
+    finally:
+        es.status, es._auftrag_offen = alt_status, alt_offen
+
+
+def test_escl_auftrag_offen_erkennt_offene_bilder():
+    """ImagesToTransfer > 0 bedeutet: es liegen noch Bilder bereit."""
+    from app import scanner_escl as es
+
+    class FakeHole:
+        def __init__(self, xml):
+            self.xml = xml
+
+        def __call__(self, url, timeout):
+            return 200, self.xml.encode("utf-8")
+
+    alt = es._hole
+
+    # Auftrag mit offenem Bild
+    es._hole = FakeHole(
+        "<scan:JobInfo><pwg:JobState>Completed</pwg:JobState>"
+        "<pwg:ImagesToTransfer>1</pwg:ImagesToTransfer></scan:JobInfo>"
+    )
+    try:
+        assert es._auftrag_offen("http://test") is True
+    finally:
+        es._hole = alt
+
+    # Auftrag ohne offene Bilder
+    es._hole = FakeHole(
+        "<scan:JobInfo><pwg:JobState>Completed</pwg:JobState>"
+        "<pwg:ImagesToTransfer>0</pwg:ImagesToTransfer></scan:JobInfo>"
+    )
+    try:
+        assert es._auftrag_offen("http://test") is False
+    finally:
+        es._hole = alt

@@ -249,6 +249,7 @@ def api_scanner_status():
             "name": config.scanner_name(),
             "bereit": zustand["bereit"],
             "zustand": zustand["zustand"],
+            "papier": zustand.get("papier", False),
         }
     )
 
