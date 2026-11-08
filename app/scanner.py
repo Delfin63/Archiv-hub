@@ -4,8 +4,10 @@ Die Quellen liegen in ``data/scanner.json`` (nicht in ``app/config``), damit
 ``deploy-synology.sh`` sie nicht überschreibt. Der Standardeintrag ist
 ``kamera`` (die Bilder kommen aus dem Browser).
 
-Weitere Quellen werden in ``data/scanner.json`` ergänzt; die ``/scan``-Seite
-und die Pipeline (Texterkennung, Klassifizierung, Ablage) bleiben unverändert.
+Hinweis: Gescannt wird über "Digitale Bilder" (macOS) in den Eingangskorb
+``data/input`` – siehe Skript 68-archiv-hub-scannen.command. Diese Liste wird
+nur noch von ``GET /api/scanner`` ausgeliefert und dient als Übersicht der
+bekannten Geräte; eine Ansteuerung aus dem Hub gibt es nicht.
 """
 
 import json

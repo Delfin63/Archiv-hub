@@ -509,7 +509,7 @@ def test_html_page_redirects_to_login_without_login(tmp_path, monkeypatch):
     appmod.app.testing = True
     client = appmod.app.test_client()
 
-    for url in ("/", "/einstellungen/ziele", "/scan"):
+    for url in ("/", "/einstellungen/ziele"):
         response = client.get(url)
         assert response.status_code == 302, url
         assert response.headers["Location"].endswith("/login"), url
@@ -636,46 +636,6 @@ def test_api_scanner_401_without_login(tmp_path, monkeypatch):
     assert response.get_json()["ok"] is False
 
 
-def test_scan_page_renders_after_login(tmp_path, monkeypatch):
-    client, data_dir, ablage_dir = _client_with_tmp_dirs(
-        tmp_path, monkeypatch, None, []
-    )
-
-    response = client.get("/scan")
-    assert response.status_code == 200
-    html = response.get_data(as_text=True)
-    assert "Scanner" in html
-    assert 'id="scanner-wahl"' in html
-    assert 'id="scan-inhalt"' in html
-
-
-def test_scan_page_hat_einstellungen_und_scan_button(tmp_path, monkeypatch):
-    client, data_dir, ablage_dir = _client_with_tmp_dirs(
-        tmp_path, monkeypatch, None, []
-    )
-
-    html = client.get("/scan").get_data(as_text=True)
-    assert 'id="scan-quelle"' in html
-    assert 'id="scan-aufloesung"' in html
-    assert 'id="scan-groesse"' in html
-    assert 'id="scan-duplex"' in html
-    assert 'id="scan-format"' in html
-    assert 'id="scan-ocr"' in html
-    assert 'id="scan-btn"' in html
-    assert ">Scan</button>" in html
-    assert "Flachbett" in html
-    assert "Dokumenteneinzug" in html
-
-
-def test_scan_page_hat_scan_vorschau(tmp_path, monkeypatch):
-    client, data_dir, ablage_dir = _client_with_tmp_dirs(
-        tmp_path, monkeypatch, None, []
-    )
-
-    html = client.get("/scan").get_data(as_text=True)
-    assert 'id="scan-vorschau"' in html
-
-
 def test_login_flow_and_start_page(tmp_path, monkeypatch):
     client, data_dir, ablage_dir = _client_with_tmp_dirs(
         tmp_path, monkeypatch, None, []
@@ -686,8 +646,8 @@ def test_login_flow_and_start_page(tmp_path, monkeypatch):
     html = response.get_data(as_text=True)
     # Gefuehrter Ablauf: die drei Schritte sind auf der Startseite angelegt.
     assert "Material einfügen" in html
-    assert "Ablageort" in html
     assert "Ablegen" in html
+    assert "Eingangskorb" in html
     assert "Eingangskorb" in html
     assert "Zur Prüfung" in html
 
@@ -730,7 +690,7 @@ def test_static_assets_are_public_without_login(tmp_path, monkeypatch):
     appmod.app.testing = True
     client = appmod.app.test_client()
 
-    for pfad in ("/static/archiv.css", "/static/archiv.js", "/static/scan.js"):
+    for pfad in ("/static/archiv.css", "/static/archiv.js", "/static/index.js"):
         response = client.get(pfad)
         assert response.status_code == 200, pfad
 

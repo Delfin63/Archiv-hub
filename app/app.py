@@ -188,13 +188,12 @@ def index():
     return render_template("index.html", active="index")
 
 
-@app.route("/scan")
-def scan_page():
-    return render_template("scan.html", active="scan")
-
-
 # ---------------------------------------------------------------------------
-# Verwaltungsoberfläche
+# Ablageorte (Verwaltung)
+#
+# Die Startseite deckt den normalen Ablauf ab. Diese Seite bleibt für das
+# Anlegen und Bearbeiten benannter Ablageorte erreichbar; sie ist nicht mehr
+# im Menü verlinkt, damit der Ablauf ohne Seitenwechsel auskommt.
 # ---------------------------------------------------------------------------
 
 @app.route("/einstellungen/ziele")

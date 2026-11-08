@@ -1005,3 +1005,13 @@ a.btn {
   border: 0;
   padding: 0;
 }
+
+/* Dezente Fussnote mit Verwaltungslinks */
+.fussnote {
+  text-align: center;
+  margin: 8px 0 24px;
+}
+
+.fussnote a {
+  color: var(--blue);
+}
