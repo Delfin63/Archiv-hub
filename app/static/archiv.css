@@ -1363,3 +1363,99 @@ a.btn {
     flex: 1 1 100%;
   }
 }
+
+/* Ordner-Wähler: navigieren, auswählen, anlegen */
+.ordner-waehler {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+  margin: 4px 0 12px;
+}
+
+.ow-kopf {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ow-kopf strong {
+  color: var(--navy);
+  word-break: break-all;
+  text-align: right;
+}
+
+.ow-neu {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.ow-neu .zeile {
+  margin: 6px 0 0;
+}
+
+.ow-neu input {
+  flex: 1 1 auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.browser-pfad {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 8px 0;
+  word-break: break-all;
+}
+
+.browser-liste {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.browser-eintrag {
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.browser-eintrag:last-child {
+  border-bottom: 0;
+}
+
+.browser-eintrag:hover {
+  background: var(--navy-soft);
+}
+
+.browser-liste .klein {
+  padding: 10px;
+}
+
+/* Gewählte Datei im Eingangskorb hervorheben */
+.korb-eintrag.ausgewaehlt {
+  background: var(--navy-soft);
+  border-radius: 8px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.korb-eintrag.ausgewaehlt .korb-name {
+  color: var(--navy);
+}

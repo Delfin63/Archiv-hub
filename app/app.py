@@ -565,16 +565,15 @@ def api_korb_ablegen(name):
     if not storage.is_known_speicherort(speicherort):
         return jsonify({"ok": False, "error": "Unbekannter Speicherort."}), 400
 
-    # Neuen Unterordner bei Bedarf anlegen.
+    # Der Zielordner darf mehrteilig sein ("Steuern/2026/Belege").
+    # Jeder Teil wird geprüft; fehlende Ebenen werden angelegt.
     if unterordner:
-        try:
-            storage.create_folder(speicherort, pfad, unterordner)
-        except ValueError as exc:
-            return (
-                jsonify({"ok": False, "error": f"Ordner: {exc}"}),
-                400,
-            )
-        pfad = str(Path(pfad) / unterordner) if pfad else unterordner
+        pfad = f"{pfad}/{unterordner}" if pfad else unterordner
+
+    try:
+        pfad = pipeline.safe_unterpfad(pfad)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": f"Ordner: {exc}"}), 400
 
     try:
         ziel_ordner = storage.safe_ablage_path(speicherort, pfad)
@@ -586,6 +585,7 @@ def api_korb_ablegen(name):
     if pfad and not ziel_ordner.is_dir():
         try:
             storage.safe_ablage_path(speicherort, str(Path(pfad).parent))
+            # parents=True legt auch verschachtelte Ebenen an.
             ziel_ordner.mkdir(parents=True, exist_ok=True)
         except (ValueError, OSError) as exc:
             return (

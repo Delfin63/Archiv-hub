@@ -134,11 +134,47 @@
 
   <div id="vorschlag-bereich"></div>
 
+  <div class="zeile">
+    <button type="button" class="btn btn-secondary" id="btn-ki-vorschlag">
+      Vorschlag von der KI
+    </button>
+  </div>
+
   <div class="ablage-wahl">
-    <label for="wahl-ordner">Ordner</label>
-    <input type="text" id="wahl-ordner" list="ordner-vorschlaege"
-           autocomplete="off" placeholder="z. B. Rechnungen">
+    <label>Ordner wählen</label>
+    {# Der gewählte Ordner. Wird vom Ordner-Wähler gesetzt. #}
+    <input type="hidden" id="wahl-ordner">
     <datalist id="ordner-vorschlaege"></datalist>
+
+    <div class="ordner-waehler" id="ordner-waehler">
+      <div class="ow-kopf">
+        <span class="klein">Ablageort</span>
+        <strong id="ow-gewaehlt">(noch nicht gewählt)</strong>
+      </div>
+
+      <div class="ow-pfad" id="browser-pfad"></div>
+
+      <ul class="browser-liste" id="browser-liste"></ul>
+
+      <div class="zeile">
+        <button type="button" class="btn btn-secondary btn-klein" id="browser-hoch">
+          ◂ Übergeordneter Ordner
+        </button>
+        <button type="button" class="btn btn-primary btn-klein" id="browser-uebernehmen">
+          Diesen Ordner verwenden
+        </button>
+      </div>
+
+      <div class="ow-neu">
+        <span class="klein">Neuen Unterordner hier anlegen:</span>
+        <div class="zeile">
+          <input type="text" id="ow-neuer-name" placeholder="Ordnername">
+          <button type="button" class="btn btn-secondary btn-klein" id="ow-anlegen">
+            Anlegen
+          </button>
+        </div>
+      </div>
+    </div>
     <p class="klein" id="ordner-hinweis"></p>
 
     <label for="wahl-dateiname">Dateiname</label>

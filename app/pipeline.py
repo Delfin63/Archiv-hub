@@ -62,57 +62,43 @@ def should_review(result, threshold):
     return float(result["sicherheit"]) < threshold
 
 
-def output_filename(
-    result,
-    original_name=None,
-    fallback_datum=None,
-    ordner=None,
-):
-    """Baut "Datum – Ordnername – Dokumentname.pdf".
+def output_filename(result, original_name=None, fallback_datum=None, ordner=None):
+    """Baut den Dateinamen aus dem Dokumentnamen.
 
-    Das Datum ist das DOKUMENTDATUM (Rechnungsdatum, Briefdatum). Fehlt es im
-    Dokument, wird ``fallback_datum`` verwendet (üblicherweise das Scandatum).
+    Es wird NUR der Dokumentname verwendet – ohne Datum und ohne Ordnername.
+    Beispiel: "Steuerveranlagung.pdf"
 
-    Leere Teile werden weggelassen – es entstehen keine Lücken und kein
-    Platzhalter wie "Unbekannt".
+    Der Ordnername steckt bereits im Ablagepfad und muss nicht wiederholt
+    werden. Ein Datum im Namen ist ebenfalls nicht nötig: Das Dokumentdatum
+    steht im Archivierungseintrag (data/archiv.log).
+
+    Fehlt der Dokumentname, wird zuerst der Dokumenttyp verwendet, danach der
+    ursprüngliche Dateiname.
     """
     result = result or {}
-    datum = str(result.get("datum") or "").strip() or str(fallback_datum or "").strip()
-    ordner = str(ordner or "").strip()
     name = str(result.get("dokumentname") or "").strip()
-    typ = str(result.get("dokumenttyp") or "").strip()
-
-    # Ohne inhaltlichen Namen hilft der Dokumenttyp als Rückfall.
     if not name:
-        name = typ
+        name = str(result.get("dokumenttyp") or "").strip()
 
-    if not name and not ordner:
-        # Nichts Brauchbares von der KI: Originalname behalten.
+    if not name:
+        # Nichts Brauchbares von der KI: ursprünglichen Namen verwenden.
         if original_name:
             stamm = Path(str(original_name)).stem.strip()
             if stamm:
-                if datum and not re.search(r"\d{4}-\d{2}-\d{2}", stamm):
-                    return f"{datum} – {stamm}.pdf"
-                return f"{stamm}.pdf"
-        return f"{datum}.pdf" if datum else "Dokument.pdf"
+                # Ein Datum am Anfang entfernen ("2026-11-08 – Scannen").
+                stamm = re.sub(r"^\d{4}-\d{2}-\d{2}\s*[–-]\s*", "", stamm).strip()
+                if stamm:
+                    return f"{stamm}.pdf"
+        return "Dokument.pdf"
 
-    # Ordnername und Dokumentname nicht doppelt nennen: sind sie gleich,
-    # wird der Name nur einmal aufgeführt.
-    teile = []
-    if datum:
-        teile.append(datum)
-    if _gleich(ordner, name):
-        if name:
-            teile.append(name)
-    else:
-        if ordner:
-            teile.append(ordner)
-        if name:
-            teile.append(name)
-    if not teile:
-        teile.append(name or ordner or "Dokument")
+    # Datum am Anfang entfernen, falls die KI eines mitgegeben hat.
+    name = re.sub(r"^\d{4}-\d{2}-\d{2}\s*[–-]\s*", "", name).strip()
+    # Ordnernamen nicht wiederholen, falls er im Namen steckt.
+    ordner = str(ordner or "").strip()
+    if ordner and _gleich(name, ordner):
+        name = ""
 
-    return " – ".join(teile) + ".pdf"
+    return f"{name}.pdf" if name else "Dokument.pdf"
 
 
 def _gleich(a, b):
@@ -199,3 +185,38 @@ def safe_ordnername(name, fallback="Sonstiges"):
     if not name or name in (".", ".."):
         return fallback
     return name[:100]
+
+
+def safe_unterpfad(pfad, fallback=""):
+    """Bereinigt einen mehrteiligen Ordnerpfad wie "Steuern/2026/Belege".
+
+    Jeder Teil wird einzeln geprüft: keine leeren Teile, kein "." oder "..",
+    keine führenden Punkte, keine Systemordner. Pfadtrenner sind erlaubt –
+    sie bilden die Verschachtelung. Ein absoluter Pfad oder ".." führt zu
+    ValueError (der Aufrufer kann darauf reagieren).
+    """
+    text = str(pfad or "").strip().replace("\\", "/")
+    if not text:
+        return fallback
+
+    if text.startswith("/"):
+        raise ValueError("Pfad darf nicht absolut sein.")
+
+    teile = [t.strip() for t in text.split("/") if t.strip()]
+    if not teile:
+        return fallback
+
+    sauber = []
+    for teil in teile:
+        if teil in (".", ".."):
+            raise ValueError("'.' und '..' sind im Pfad nicht erlaubt.")
+        if teil.startswith("."):
+            raise ValueError("Ein Teil darf nicht mit einem Punkt beginnen.")
+        if teil.upper() in (
+            "$RECYCLE.BIN", "@EADIR", "SYSTEM VOLUME INFORMATION", "LOST+FOUND"
+        ):
+            raise ValueError(f"'{teil}' ist als Ordnername nicht erlaubt.")
+        sauber.append(teil)
+
+    ergebnis = "/".join(sauber)
+    return ergebnis[:200]

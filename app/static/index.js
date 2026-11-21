@@ -99,6 +99,8 @@ function setzeKnopfZustand() {
   setzeAktiv("btn-weiter", zielOffen && !ablageOffen);
   // "Ablegen" ist aktiv, solange der Schritt offen und noch nicht abgelegt.
   setzeAktiv("btn-ablegen", ablageOffen && !bereitsAbgelegt);
+  // "Neue Quelle" muss immer anklickbar bleiben: nach dem Ablegen ist es der
+  // einzige Weg zurück zum Anfang. Wird es gesperrt, gibt es eine Sackgasse.
 }
 
 function setzeAktiv(id, aktiv) {
@@ -270,7 +272,10 @@ document.getElementById("scan-start").addEventListener("click", function () {
   if (!scannerBereit) return;
   var btn = document.getElementById("scan-start");
   btn.disabled = true;
-  zeigeErgebnis("Scanne … das kann bis zu einer Minute dauern.", false);
+  zeigeErgebnis(
+    "Scanne … je nach Seitenzahl kann das mehrere Minuten dauern. " +
+    "Bitte warten, bis die Meldung erscheint.", false
+  );
 
   api("/api/scanner/scan", "POST", {
     quelle: document.getElementById("scan-quelle").value,
@@ -282,8 +287,9 @@ document.getElementById("scan-start").addEventListener("click", function () {
     .then(function (d) {
       leereErgebnis();
       korbZeigen(true);
+      // Auswahl ZUERST setzen, damit der Korb sie hervorheben kann.
+      gewaehlt = { name: d.name };
       loadKorb();
-      // Schritt 3 (Scannen) ist erledigt -> weiter zu "Ziel wählen".
       starteSchritt2({ name: d.name });
     })
     .catch(function (err) { zeigeErgebnis(err.message, true); })
@@ -314,13 +320,17 @@ function loadKorb() {
         return;
       }
       liste.innerHTML = dateien.map(function (f) {
+        // Die bereits gewählte Datei wird hervorgehoben.
+        var istGewaehlt = gewaehlt && gewaehlt.name === f.name;
         return (
-          '<li class="korb-eintrag">' +
+          '<li class="korb-eintrag' + (istGewaehlt ? " ausgewaehlt" : "") + '">' +
             '<div class="korb-name">' + esc(f.name) + "</div>" +
             '<div class="klein korb-meta">' + groesse(f.groesse) +
               " · " + datum(f.geaendert) + "</div>" +
-            '<button type="button" class="btn btn-primary btn-klein" data-waehlen="' +
-              esc(f.name) + '">Wählen</button>' +
+            (istGewaehlt
+              ? '<span class="plakette plakette-aktiv">Gewählt</span>'
+              : '<button type="button" class="btn btn-primary btn-klein" ' +
+                'data-waehlen="' + esc(f.name) + '">Wählen</button>') +
             '<button type="button" class="btn btn-still btn-klein" data-ablehnen="' +
               esc(f.name) + '">Weglegen</button>' +
           "</li>"
@@ -401,57 +411,84 @@ function starteSchritt2(auswahl) {
   gewaehlt = auswahl;
   leereErgebnis();
   document.getElementById("gewaehlte-datei").textContent = "Datei: " + auswahl.name;
-  document.getElementById("vorschlag-bereich").innerHTML =
-    '<p class="klein">Analysiere … (Texterkennung und Einordnung)</p>';
   zeigeSchritt(zielSchrittNr());
   zeigeArbeitsbereiche(true, false);
-  document.getElementById("schritt-2").scrollIntoView({ block: "start" });
 
-  ladeAblageOrte()
-    .then(function () {
-      return api("/api/korb/" + encodeURIComponent(auswahl.name) + "/vorschlag", "POST");
-    })
+  // Felder bleiben leer – der Nutzer bestimmt Ordner und Titel selbst.
+  // Die KI liefert nur auf Knopfdruck einen Vorschlag.
+  document.getElementById("vorschlag-bereich").innerHTML =
+    '<p class="klein">Ordner und Dateiname selbst eingeben – oder einen ' +
+    "Vorschlag von der KI holen.</p>";
+  setzeOrdner("");
+  document.getElementById("wahl-dateiname").value =
+    vorschlagDateiname(auswahl.name);
+  document.getElementById("datum-hinweis").textContent = "";
+
+  ladeAblageOrte().then(function () {
+    // Ordnerliste aufbauen und den Wähler auf die oberste Ebene stellen.
+    browserPfad = [];
+    browserLaden();
+    // Erst nach dem Aufbau der Liste scrollen, sonst springt die Seite
+    // durch das gleichzeitige Neuladen des Eingangskorbs wieder nach oben.
+    window.setTimeout(function () {
+      document.getElementById("schritt-2")
+        .scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 80);
+  });
+}
+
+// Holt den Vorschlag der KI und trägt ihn in die Felder ein.
+function kiVorschlagHolen() {
+  if (!gewaehlt) return;
+  var btn = document.getElementById("btn-ki-vorschlag");
+  btn.disabled = true;
+  document.getElementById("vorschlag-bereich").innerHTML =
+    '<p class="klein">Analysiere … (Texterkennung und Einordnung)</p>';
+
+  api("/api/korb/" + encodeURIComponent(gewaehlt.name) + "/vorschlag", "POST")
     .then(function (d) {
       var v = d.vorschlag || {};
       if (v.speicherort) {
         document.getElementById("wahl-speicherort").value = v.speicherort;
       }
       ladeOrdnerVorschlaege();
-      setzeOrdner(v.ordner || "");
-      document.getElementById("wahl-dateiname").value = v.dateiname || "";
+      if (v.ordner) {
+        setzeOrdner(v.ordner);
+        // Wähler auf den vorgeschlagenen Ordner stellen.
+        browserPfad = String(v.ordner).split("/").filter(function (x) { return x; });
+        browserLaden();
+      }
+      if (v.dateiname) {
+        document.getElementById("wahl-dateiname").value = v.dateiname;
+      }
 
-      // Hinweis, woher das Datum im Dateinamen stammt.
       var dh = document.getElementById("datum-hinweis");
       if (v.datum_aus_dokument) {
         dh.textContent = "Datum aus dem Dokument: " + v.datum;
       } else {
-        dh.textContent =
-          "Kein Datum im Dokument gefunden – es wurde das Scan-Datum " +
-          "verwendet. Du kannst den Namen oben anpassen.";
+        dh.textContent = "Kein Datum im Dokument gefunden.";
       }
 
-      if (v.ordner) {
-        document.getElementById("vorschlag-bereich").innerHTML =
-          '<div class="vorschlag">Vorschlag: <strong>' + esc(v.ordner) +
-          "</strong>" +
-          (v.ordner_vorhanden ? ' <span class="klein">(vorhanden)</span>'
-                              : ' <span class="klein">(wird neu angelegt)</span>') +
-          (v.dokumenttyp
-            ? '<div class="klein">' + esc(v.dokumenttyp) +
-              (v.absender ? " · " + esc(v.absender) : "") + "</div>"
-            : "") +
-          "</div>";
-      } else {
-        document.getElementById("vorschlag-bereich").innerHTML =
-          '<p class="klein">Kein Vorschlag möglich – bitte Ordner und ' +
-          "Dateiname selbst bestimmen.</p>";
-      }
+      document.getElementById("vorschlag-bereich").innerHTML =
+        '<div class="vorschlag">Vorschlag: <strong>' + esc(v.ordner || "–") +
+        "</strong>" +
+        (v.ordner_vorhanden ? ' <span class="klein">(vorhanden)</span>'
+                            : ' <span class="klein">(wird neu angelegt)</span>') +
+        (v.dokumenttyp
+          ? '<div class="klein">' + esc(v.dokumenttyp) +
+            (v.absender ? " · " + esc(v.absender) : "") + "</div>"
+          : "") +
+        '<div class="klein">Beides kannst du oben ändern.</div>' +
+        "</div>";
     })
     .catch(function (err) {
       document.getElementById("vorschlag-bereich").innerHTML =
         '<p class="klein">' + esc(err.message) + "</p>";
-    });
+    })
+    .then(function () { btn.disabled = false; });
 }
+
+document.getElementById("btn-ki-vorschlag").addEventListener("click", kiVorschlagHolen);
 
 // Baut einen Dateinamen-Vorschlag für den Fall, dass die KI keinen liefert.
 // Ein bereits vorhandenes Datum im Namen (z. B. "Scan_2026-11-08_14-01-32")
@@ -495,14 +532,19 @@ function ladeOrdnerVorschlaege() {
   }).join("");
   var hinweis = document.getElementById("ordner-hinweis");
   hinweis.textContent = ordner.length
-    ? "Vorhanden: " + ordner.join(", ") +
-      " – oder einen neuen Namen eingeben."
-    : "Noch keine Ordner vorhanden – der Name wird beim Ablegen angelegt.";
+    ? "Oberste Ebene: " + ordner.join(", ")
+    : "Noch keine Ordner vorhanden – lege oben einen an.";
 }
 
 function setzeOrdner(name) {
-  document.getElementById("wahl-ordner").value = name || "";
+  gewaehlterOrdner = name || "";
+  document.getElementById("wahl-ordner").value = gewaehlterOrdner;
+  var el = document.getElementById("ow-gewaehlt");
+  if (el) {
+    el.textContent = gewaehlterOrdner || "(noch nicht gewählt)";
+  }
   zeigeWahlPfad();
+  owKnoepfeAktualisieren();
 }
 
 function zeigeWahlPfad() {
@@ -518,6 +560,7 @@ function zeigeWahlPfad() {
 document.getElementById("wahl-speicherort").addEventListener("change", function () {
   ladeOrdnerVorschlaege();
   zeigeWahlPfad();
+  browserZuruecksetzen();
 });
 document.getElementById("wahl-ordner").addEventListener("input", zeigeWahlPfad);
 
@@ -596,14 +639,24 @@ function pruefeAngaben() {
   return null;
 }
 
+var ablegenLaeuft = false;
+
 document.getElementById("btn-ablegen").addEventListener("click", function () {
   if (!gewaehlt) return;
+  // Doppelklick verhindern: das Ablegen dauert bei vielen Seiten lange.
+  if (ablegenLaeuft) return;
+  if (bereitsAbgelegt) return;
   var fehler = pruefeAngaben();
   if (fehler) { zeigeErgebnis(fehler, true); return; }
 
   var daten = aktuelleSpeicherortDaten();
   var ordner = document.getElementById("wahl-ordner").value.trim();
   var dateiname = document.getElementById("wahl-dateiname").value.trim();
+
+  // Knopf sofort sperren, damit der Vorgang nicht doppelt startet.
+  ablegenLaeuft = true;
+  setzeAktiv("btn-ablegen", false);
+  document.getElementById("btn-zurueck").disabled = true;
 
   zeigeErgebnis("Lege ab … (Texterkennung läuft)", false);
   api("/api/korb/" + encodeURIComponent(gewaehlt.name) + "/ablegen", "POST", {
@@ -613,6 +666,7 @@ document.getElementById("btn-ablegen").addEventListener("click", function () {
   })
     .then(function (d) {
       zeigeErgebnis("Abgelegt: " + d.ziel, false);
+      ablegenLaeuft = false;
       gewaehlt = null;
       bereitsAbgelegt = true;
       // NICHTS ausblenden: die Schritte 4 und 5 bleiben sichtbar stehen.
@@ -624,8 +678,137 @@ document.getElementById("btn-ablegen").addEventListener("click", function () {
       document.getElementById("zeile-neu").hidden = false;
       loadKorb();
     })
+    .catch(function (err) {
+      // Fehler: Knöpfe wieder freigeben, damit ein neuer Versuch möglich ist.
+      ablegenLaeuft = false;
+      document.getElementById("btn-zurueck").disabled = false;
+      setzeKnopfZustand();
+      zeigeErgebnis(err.message, true);
+    });
+});
+
+// --- Ordner-Wähler ----------------------------------------------------------
+//
+// Ein Bereich, ein Zweck: durch die Ordner navigieren und einen auswählen.
+//   - Ordner anklicken      = hineingehen
+//   - "Übergeordneter Ordner" = eine Ebene zurück
+//   - "Diesen Ordner verwenden" = hierhin ablegen
+//   - "Anlegen"            = neuen Unterordner erstellen und hineingehen
+
+var browserPfad = [];      // aktueller Standort im Baum
+var gewaehlterOrdner = ""; // tatsächlich gewählter Ablageordner
+
+function browserLaden() {
+  var daten = aktuelleSpeicherortDaten();
+  if (!daten) return;
+  var pfad = browserPfad.join("/");
+
+  api(
+    "/api/ablage/ordner?speicherort=" + encodeURIComponent(daten.speicherort) +
+    "&pfad=" + encodeURIComponent(pfad),
+    "GET"
+  )
+    .then(function (d) {
+      var liste = document.getElementById("browser-liste");
+      var ordner = (d && d.ordner) || [];
+      liste.innerHTML = ordner.length
+        ? ordner.map(function (o) {
+            return '<li class="browser-eintrag" data-name="' + esc(o) + '">' +
+              "📁 " + esc(o) + "</li>";
+          }).join("")
+        : '<li class="klein">Keine Unterordner vorhanden.</li>';
+
+      document.getElementById("browser-pfad").textContent =
+        (daten.host_pfad || "") + (pfad ? "/" + pfad : "");
+      document.getElementById("browser-hoch").disabled = !browserPfad.length;
+      owKnoepfeAktualisieren();
+    })
+    .catch(function (err) {
+      document.getElementById("browser-liste").innerHTML =
+        '<li class="klein">' + esc(err.message) + "</li>";
+    });
+}
+
+// Aktualisiert die Knöpfe des Ordner-Wählers.
+//   "Diesen Ordner verwenden" ist inaktiv, wenn der angezeigte Ordner bereits
+//   gewählt ist. "Anlegen" ist inaktiv, solange kein Name eingegeben wurde.
+function owKnoepfeAktualisieren() {
+  var aktuellerPfad = browserPfad.join("/");
+  var uebernehmen = document.getElementById("browser-uebernehmen");
+  if (uebernehmen) {
+    var schonGewaehlt = (gewaehlterOrdner || "") === aktuellerPfad;
+    uebernehmen.disabled = schonGewaehlt;
+    uebernehmen.textContent = schonGewaehlt
+      ? "Ordner ist gewählt"
+      : "Diesen Ordner verwenden";
+  }
+
+  var anlegen = document.getElementById("ow-anlegen");
+  if (anlegen) {
+    var feld = document.getElementById("ow-neuer-name");
+    anlegen.disabled = !feld || !feld.value.trim();
+  }
+}
+
+document.getElementById("browser-liste").addEventListener("click", function (e) {
+  var li = e.target.closest("li.browser-eintrag");
+  if (!li) return;
+  browserPfad.push(li.getAttribute("data-name"));
+  browserLaden();
+});
+
+document.getElementById("browser-hoch").addEventListener("click", function () {
+  if (!browserPfad.length) return;
+  browserPfad.pop();
+  browserLaden();
+});
+
+// Diesen Ordner als Ablageort übernehmen.
+document.getElementById("browser-uebernehmen").addEventListener("click", function () {
+  setzeOrdner(browserPfad.join("/"));
+  zeigeErgebnis(
+    "Ablageort gewählt: " +
+    (browserPfad.length ? browserPfad.join("/") : "(Wurzel des Speicherorts)"),
+    false
+  );
+});
+
+// Neuen Unterordner anlegen und direkt hineingehen.
+document.getElementById("ow-anlegen").addEventListener("click", function () {
+  var feld = document.getElementById("ow-neuer-name");
+  var name = feld.value.trim();
+  var daten = aktuelleSpeicherortDaten();
+  if (!name) { zeigeErgebnis("Bitte einen Ordnernamen angeben.", true); return; }
+  if (!daten) { zeigeErgebnis("Kein Speicherort verfügbar.", true); return; }
+
+  api("/api/ablage/ordner", "POST", {
+    speicherort: daten.speicherort,
+    pfad: browserPfad.join("/"),
+    name: name
+  })
+    .then(function () {
+      feld.value = "";
+      browserPfad.push(name);
+      browserLaden();
+      zeigeErgebnis("Ordner angelegt: " + name, false);
+    })
     .catch(function (err) { zeigeErgebnis(err.message, true); });
 });
+
+document.getElementById("ow-neuer-name").addEventListener("input", function () {
+  owKnoepfeAktualisieren();
+});
+
+document.getElementById("ow-neuer-name").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("ow-anlegen").click(); }
+});
+
+// Beim Wechsel des Speicherorts den Wähler zurücksetzen.
+function browserZuruecksetzen() {
+  browserPfad = [];
+  setzeOrdner("");
+  browserLaden();
+}
 
 // Nach dem Ablegen: zurück zum Anfang für das nächste Dokument.
 document.getElementById("btn-neue-quelle").addEventListener("click", function () {
@@ -637,6 +820,7 @@ document.getElementById("btn-neue-quelle").addEventListener("click", function ()
   // Zustand zurücksetzen.
   gewaehlt = null;
   bereitsAbgelegt = false;
+  ablegenLaeuft = false;
   leereErgebnis();
   document.getElementById("upload-bereich").hidden = true;
   document.getElementById("scan-bereich").hidden = true;

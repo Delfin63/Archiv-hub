@@ -151,7 +151,8 @@ def test_output_filename():
     """Format: Datum – Ordnername – Dokumentname.pdf"""
     result = {"datum": "2026-11-07", "dokumentname": "Rechnung", "dokumenttyp": "Rechnung"}
     name = pipeline.output_filename(result, ordner="Rechnungen")
-    assert name == "2026-11-07 – Rechnungen – Rechnung.pdf"
+    # Nur der Dokumentname – ohne Datum und ohne Ordnername.
+    assert name == "Rechnung.pdf"
 
 
 def test_unique_destination_appends_counter(tmp_path):
@@ -360,7 +361,7 @@ def test_upload_files_confident_document(tmp_path, monkeypatch):
     payload = response.get_json()
     assert payload["status"] == "abgelegt"
 
-    expected = ablage_dir / "standard" / "healing" / "2026-11-07 – Ziel z1 – Serverwartung.pdf"
+    expected = ablage_dir / "standard" / "healing" / "Serverwartung.pdf"
     assert expected.exists()
 
     log_line = (data_dir / "archiv.log").read_text(encoding="utf-8").strip()
@@ -383,7 +384,7 @@ def test_upload_jahresordner_creates_year_subfolder(tmp_path, monkeypatch):
     response = _upload(client)
     assert response.get_json()["status"] == "abgelegt"
 
-    expected = ablage_dir / "standard" / "healing" / "2026" / "2026-11-07 – Ziel z1 – Ueberweisung.pdf"
+    expected = ablage_dir / "standard" / "healing" / "2026" / "Ueberweisung.pdf"
     assert expected.exists()
 
 
@@ -1246,17 +1247,24 @@ def test_korb_erledigt_ueberschreibt_nichts(tmp_path, monkeypatch):
     assert dateien == ["scan (2).pdf", "scan.pdf"]
 
 
-def test_output_filename_ohne_absender_und_typ():
-    """Ohne KI-Angaben entsteht kein Name mit doppelten Trennstrichen."""
+def test_output_filename_ohne_ki_angaben():
+    """Ohne KI-Angaben wird der ursprüngliche Dateiname verwendet."""
     r = pipeline.output_filename(
         {"datum": "2026-11-08", "absender": None, "dokumenttyp": None}, "scan.pdf"
     )
-    assert r == "2026-11-08 – scan.pdf"
+    assert r == "scan.pdf"
 
-    r2 = pipeline.output_filename(
-        {"datum": "2026-11-08", "absender": None, "dokumenttyp": None}
+    # Ohne alles bleibt ein neutraler Name.
+    r2 = pipeline.output_filename({"datum": "2026-11-08"})
+    assert r2 == "Dokument.pdf"
+
+
+def test_output_filename_entfernt_fuehrendes_datum():
+    """Ein Datum am Anfang des KI-Namens wird entfernt."""
+    r = pipeline.output_filename(
+        {"dokumentname": "2026-11-08 – Steuerveranlagung", "dokumenttyp": "X"}
     )
-    assert r2 == "2026-11-08.pdf"
+    assert r == "Steuerveranlagung.pdf"
 
 
 # ---------------------------------------------------------------------------
@@ -1919,7 +1927,7 @@ def test_dateiname_nutzt_dokumentdatum():
         fallback_datum="2026-11-08",
         ordner="Rechnungen",
     )
-    assert r == "2026-10-15 – Rechnungen – Serverwartung.pdf"
+    assert r == "Serverwartung.pdf"
 
 
 def test_dateiname_faellt_auf_scandatum_zurueck():
@@ -1929,7 +1937,7 @@ def test_dateiname_faellt_auf_scandatum_zurueck():
         fallback_datum="2026-11-08",
         ordner="Uebungsanleitungen",
     )
-    assert r == "2026-11-08 – Uebungsanleitungen – Ischias.pdf"
+    assert r == "Ischias.pdf"
 
 
 def test_dateiname_ohne_platzhalter():
@@ -1938,7 +1946,7 @@ def test_dateiname_ohne_platzhalter():
         {"datum": "2026-11-08", "dokumentname": "", "dokumenttyp": "Uebungsanleitung"},
         ordner="Uebungsanleitungen",
     )
-    assert r == "2026-11-08 – Uebungsanleitungen – Uebungsanleitung.pdf"
+    assert r == "Uebungsanleitung.pdf"
     assert "Unbekannt" not in r
 
 
@@ -2097,8 +2105,8 @@ def test_umlaut_und_umschreibung_gelten_als_gleich():
          "dokumenttyp": "X"},
         ordner="Uebungsanleitungen",
     )
-    # Nicht doppelt nennen – die Schreibweise des Dokuments gewinnt.
-    assert r == "2026-11-08 – Übungsanleitungen.pdf"
+    # Name und Ordner sind gleich: kein sinnvoller Dateiname übrig.
+    assert r == "Dokument.pdf"
 
 
 # ---------------------------------------------------------------------------
@@ -2398,3 +2406,157 @@ def test_escl_auftrag_offen_erkennt_offene_bilder():
         assert es._auftrag_offen("http://test") is False
     finally:
         es._hole = alt
+
+
+# ---------------------------------------------------------------------------
+# Verschachtelte Zielordner ("Steuern/2026/Belege")
+# ---------------------------------------------------------------------------
+
+
+def test_unterpfad_erlaubt_verschachtelung():
+    assert pipeline.safe_unterpfad("Steuern") == "Steuern"
+    assert pipeline.safe_unterpfad("Steuern/2026") == "Steuern/2026"
+    assert pipeline.safe_unterpfad("Steuern/2026/Belege") == "Steuern/2026/Belege"
+    # Leerzeichen und doppelte Trenner werden bereinigt.
+    assert pipeline.safe_unterpfad("  Steuern / 2026  ") == "Steuern/2026"
+    assert pipeline.safe_unterpfad("Steuern//2026") == "Steuern/2026"
+
+
+def test_unterpfad_lehnt_ausbrueche_ab():
+    for boese in ("/etc", "../raus", "Steuern/../etc", ".geheim",
+                  "Steuern/.geheim", "@eaDir", "$RECYCLE.BIN"):
+        with pytest.raises(ValueError):
+            pipeline.safe_unterpfad(boese)
+
+
+def test_ablegen_in_verschachtelten_ordner(tmp_path, monkeypatch):
+    """Ein mehrteiliger Pfad wird angelegt und die Datei dort abgelegt."""
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={
+            "speicherort": "standard",
+            "pfad": "Steuern/2026/Belege",
+            "dateiname": "2026-11-11 – Steuererklärung.pdf",
+        },
+    )
+    assert r.status_code == 200, r.get_json()
+
+    ordner = data_dir.parent / "ablage" / "standard" / "Steuern" / "2026" / "Belege"
+    assert ordner.is_dir(), "Verschachtelter Ordner wurde nicht angelegt"
+    assert list(ordner.glob("*.pdf"))
+
+
+def test_ablegen_lehnt_pfadausbruch_ab(tmp_path, monkeypatch):
+    client, data_dir, korb = _korb_client(tmp_path, monkeypatch, [])
+    (korb / "scan.pdf").write_bytes(b"%PDF")
+
+    r = client.post(
+        "/api/korb/scan.pdf/ablegen",
+        json={"speicherort": "standard", "pfad": "../../ausserhalb"},
+    )
+    assert r.status_code == 400
+    # Nichts darf ausserhalb entstanden sein.
+    assert not (data_dir.parent / "ausserhalb").exists()
+
+
+def test_js_ordner_waehler_vorhanden():
+    """Der Ordner-Wähler muss im Template und im Skript vorhanden sein."""
+    html = (PROJECT_DIR / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+
+    for kennung in ("ordner-waehler", "browser-liste", "browser-pfad",
+                    "browser-hoch", "browser-uebernehmen",
+                    "ow-gewaehlt", "ow-neuer-name", "ow-anlegen"):
+        assert f'id="{kennung}"' in html, f"{kennung} fehlt im Template"
+
+    # Elemente mit Handler
+    for kennung in ("browser-liste", "browser-pfad", "browser-hoch",
+                    "browser-uebernehmen", "ow-gewaehlt", "ow-neuer-name",
+                    "ow-anlegen"):
+        assert kennung in js, f"{kennung} hat keinen Handler"
+
+    # Navigation: hinein, hoch, übernehmen
+    assert "browserPfad.push" in js
+    assert "browserPfad.pop" in js
+    assert '"/api/ablage/ordner?speicherort="' in js
+    # Ordner anlegen
+    assert '"/api/ablage/ordner", "POST"' in js
+
+
+def test_js_ruft_nur_definierte_funktionen_auf_browser():
+    """Auch die neuen Browser-Funktionen müssen definiert sein."""
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+    definiert = set(re.findall(r"function\s+(\w+)", js))
+    gerufen = set(re.findall(r"\b(browser\w+)\s*\(", js))
+    fehlend = sorted(gerufen - definiert)
+    assert not fehlend, f"Nicht definierte Browser-Funktionen: {fehlend}"
+
+
+def test_js_waehlt_scan_automatisch():
+    """Nach dem Scannen wird die Datei automatisch gewählt und markiert."""
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+
+    # Nach dem Scan wird die Auswahl gesetzt, bevor der Korb neu zeichnet.
+    stelle = js.index('"/api/scanner/scan", "POST"')
+    umgebung = js[stelle:stelle + 900]
+    assert "gewaehlt = { name: d.name }" in umgebung, (
+        "Die gescannte Datei wird nicht automatisch gewählt"
+    )
+    assert "starteSchritt2" in umgebung, "Schritt 4 wird nicht geöffnet"
+
+    # Der Korb hebt die gewählte Datei hervor.
+    assert "istGewaehlt" in js
+    assert "ausgewaehlt" in js
+
+
+def test_js_ordnerliste_wird_beim_oeffnen_gefuellt():
+    """Beim Öffnen von Schritt 4 muss die Ordnerliste aufgebaut werden.
+
+    Sonst bleibt der Wähler leer und der Nutzer sieht keine Ordner.
+    """
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+
+    stelle = js.index("function starteSchritt2(auswahl) {")
+    umgebung = js[stelle:stelle + 1200]
+    assert "browserLaden()" in umgebung, (
+        "Die Ordnerliste wird beim Öffnen von Schritt 4 nicht aufgebaut"
+    )
+    assert "ladeAblageOrte()" in umgebung, (
+        "Die Ablageorte werden vor dem Aufbau der Liste nicht geladen"
+    )
+
+
+def test_js_ordner_knopf_graut_aus():
+    """Nach dem Übernehmen wird der Knopf inaktiv."""
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+
+    assert "owKnoepfeAktualisieren" in js
+    # Der Knopf wird deaktiviert, wenn der Ordner bereits gewählt ist.
+    assert "uebernehmen.disabled = schonGewaehlt" in js
+    assert 'textContent = schonGewaehlt' in js
+    # "Anlegen" ist nur mit Namen aktiv.
+    assert "anlegen.disabled = !feld" in js
+    # Der Zustand wird nach jedem Aufbau der Liste neu berechnet.
+    assert js.count("owKnoepfeAktualisieren()") >= 3
+
+
+def test_js_ablegen_wird_beim_klick_gesperrt():
+    """Der Ablegen-Knopf darf während des Vorgangs nicht klickbar bleiben.
+
+    Bei vielen Seiten dauert das Ablegen lange; ohne Sperre wären Doppelklicks
+    möglich und die Datei würde mehrfach abgelegt.
+    """
+    js = (PROJECT_DIR / "app" / "static" / "index.js").read_text(encoding="utf-8")
+
+    assert "ablegenLaeuft" in js
+    stelle = js.index('document.getElementById("btn-ablegen").addEventListener')
+    umgebung = js[stelle:stelle + 900]
+    assert "if (ablegenLaeuft) return;" in umgebung, "Kein Doppelklick-Schutz"
+    assert 'setzeAktiv("btn-ablegen", false)' in umgebung, (
+        "Der Knopf wird beim Klick nicht gesperrt"
+    )
+    # Nach dem Ablegen wird "Neue Quelle" gezeigt.
+    assert 'zeile-neu").hidden = false' in js
