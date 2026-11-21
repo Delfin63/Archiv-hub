@@ -164,6 +164,7 @@ function korbZeigen(zeigen) {
 
 document.getElementById("kachel-scan").addEventListener("click", function () {
   zeigeQuelle("scan");
+  zeigeScanFelder();
   pruefeScanner();
 });
 document.getElementById("kachel-upload").addEventListener("click", function () {
@@ -185,8 +186,52 @@ var scannerBereit = false;
 var bereitsAbgelegt = false;
 var scannerTimer = null;
 
+// Welches Gerät ist gewählt? Geräte, die der Hub nicht selbst erreicht
+// (USB-ScanSnap, Brother J6920DW), laufen über die App "Scan" am Mac.
+var GERAETE_SCAN_APP = ["scansnap-s1500", "brother-mfc-j6920dw"];
+
+function scanGeraet() {
+  var el = document.getElementById("scan-geraet");
+  return el ? el.value : "brother-mfc-l2980dw";
+}
+
+function istScanSnap() {
+  return GERAETE_SCAN_APP.indexOf(scanGeraet()) !== -1;
+}
+
+// Anzeigename des gewählten Geräts.
+function scanGeraetName() {
+  var el = document.getElementById("scan-geraet");
+  return el && el.selectedIndex >= 0
+    ? el.options[el.selectedIndex].text
+    : "Scanner";
+}
+
+// Beim ScanSnap stellt der Mac die Einstellungen ein; die eSCL-Felder
+// (Auflösung, Vorlage, Farbe, Duplex) haben dort keine Wirkung.
+function zeigeScanFelder() {
+  var snap = istScanSnap();
+  var grid = document.getElementById("scan-grid");
+  if (!grid) return;
+  var felder = grid.querySelectorAll("label:not(:first-child)");
+  for (var i = 0; i < felder.length; i++) {
+    felder[i].hidden = snap;
+  }
+}
+
 function pruefeScanner() {
   var el = document.getElementById("scanner-status");
+
+  if (istScanSnap()) {
+    stoppeScannerPruefung();
+    scannerBereit = true;
+    el.textContent =
+      scanGeraetName() + ": Beim Scannen öffnet sich die App „Scan“ auf dem " +
+      "Mac. Das Dokument landet danach im Eingangskorb.";
+    setzeKnopfZustand();
+    return;
+  }
+
   el.textContent = "Prüfe Scanner …";
   api("/api/scanner/status", "GET")
     .then(function (d) {
@@ -246,8 +291,21 @@ document.getElementById("scan-skript-zeigen").addEventListener("click", function
   h.hidden = !h.hidden;
 });
 
+// Gerätewechsel: Beim ScanSnap laufen die eSCL-Felder ins Leere, sie werden
+// ausgeblendet. Der Status wird neu geholt.
+var geraetFeld = document.getElementById("scan-geraet");
+if (geraetFeld) {
+  geraetFeld.addEventListener("change", function () {
+    zeigeScanFelder();
+    pruefeScanner();
+  });
+}
+
 // Kurzfassung der aktuellen Scan-Einstellungen (für Schritt 3).
 function scanKurzfassung() {
+  if (istScanSnap()) {
+    return scanGeraetName() + " · App „Scan“ am Mac";
+  }
   var aufl = document.getElementById("scan-aufloesung").value;
   var vorlage = document.getElementById("scan-quelle");
   var farbe = document.getElementById("scan-farbe");
@@ -272,6 +330,25 @@ document.getElementById("scan-start").addEventListener("click", function () {
   if (!scannerBereit) return;
   var btn = document.getElementById("scan-start");
   btn.disabled = true;
+
+  if (istScanSnap()) {
+    zeigeErgebnis("Öffne die App „Scan“ auf dem Mac …", false);
+    api("/api/scanner/scan-app", "POST", { geraet: scanGeraet() })
+      .then(function () {
+        zeigeErgebnis(
+          "Die App „Scan“ ist geöffnet. Scanne dort das Dokument – es " +
+          "erscheint danach im Eingangskorb. Danach hier auf " +
+          "„Aktualisieren“ klicken.",
+          false
+        );
+        korbZeigen(true);
+        loadKorb();
+      })
+      .catch(function (err) { zeigeErgebnis(err.message, true); })
+      .then(function () { btn.disabled = false; });
+    return;
+  }
+
   zeigeErgebnis(
     "Scanne … je nach Seitenzahl kann das mehrere Minuten dauern. " +
     "Bitte warten, bis die Meldung erscheint.", false

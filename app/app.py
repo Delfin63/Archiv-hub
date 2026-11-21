@@ -18,6 +18,8 @@ import hmac
 import os
 import secrets
 import shutil
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -61,6 +63,11 @@ SESSION_GENERATION = hashlib.sha256(
         + app.config["PASSWORD_HASH"]
     ).encode("utf-8")
 ).hexdigest()
+
+# Der Mac-Helfer öffnet die App "Scan" und sieht danach rund 10 Sekunden
+# lang nach, ob eine Datei entstanden ist. Das Zeitlimit muss darüber liegen,
+# sonst bricht der Aufruf ab, obwohl der Helfer korrekt arbeitet.
+SCAN_APP_TIMEOUT = 30
 
 
 def _read_version():
@@ -342,6 +349,85 @@ def api_scanner_scan():
             "quelle": quelle,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Geräte über die macOS-App "Scan"
+#
+# Manche Scanner erreicht der Hub nicht selbst: Der ScanSnap S1500 hängt per
+# USB am Mac, der Brother MFC-J6920DW spricht nur Brothers eigenes
+# Scan-Protokoll (kein eSCL). Der Hub läuft im Container und kann beide nicht
+# ansteuern. Er bittet deshalb den Mac-Helfer (Skript 69-...command) über
+# host.docker.internal, die App "Scan" zu öffnen. Den Scan löst der Nutzer
+# dort selbst aus; die fertige Datei landet im Eingangskorb.
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/scanner/scan-app", methods=["POST"])
+def api_scanner_scan_app():
+    """Öffnet die App "Scan" auf dem Mac für das gewählte Gerät."""
+    data = request.get_json(silent=True) or {}
+    geraet_id = str(data.get("geraet") or "").strip() or None
+
+    geraet = scanner.finde_scan_app(geraet_id)
+    if geraet is None:
+        return (
+            jsonify({"ok": False, "error": "Kein Gerät für die App „Scan“ eingerichtet."}),
+            400,
+        )
+
+    helfer = config.scan_app_url()
+    if not helfer:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Dieser Weg ist nicht eingerichtet. "
+                        "ARCHIV_HUB_SCAN_APP_URL setzen und den Helfer auf dem "
+                        "Mac starten (69-archiv-hub-scansnap-helfer.command)."
+                    ),
+                }
+            ),
+            400,
+        )
+
+    try:
+        antwort = urllib.request.urlopen(
+            urllib.request.Request(f"{helfer.rstrip('/')}/scan", data=b""),
+            timeout=SCAN_APP_TIMEOUT,
+        )
+        antwort.read()
+    except urllib.error.URLError as exc:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        f"Der Helfer auf dem Mac antwortet nicht ({exc.reason}). "
+                        "Läuft 69-archiv-hub-scansnap-helfer.command?"
+                    ),
+                }
+            ),
+            502,
+        )
+    except TimeoutError:
+        # Der Helfer wartet selbst auf den Scan; eine Zeitüberschreitung
+        # heisst nicht, dass er nicht läuft.
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Der Helfer auf dem Mac meldet sich nicht rechtzeitig. "
+                        "Läuft 69-archiv-hub-scansnap-helfer.command?"
+                    ),
+                }
+            ),
+            504,
+        )
+
+    return jsonify({"ok": True, "geraet": geraet.name})
 
 
 # ---------------------------------------------------------------------------

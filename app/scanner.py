@@ -4,10 +4,16 @@ Die Quellen liegen in ``data/scanner.json`` (nicht in ``app/config``), damit
 ``deploy-synology.sh`` sie nicht überschreibt. Der Standardeintrag ist
 ``kamera`` (die Bilder kommen aus dem Browser).
 
-Hinweis: Gescannt wird über "Digitale Bilder" (macOS) in den Eingangskorb
-``data/input`` – siehe Skript 68-archiv-hub-scannen.command. Diese Liste wird
-nur noch von ``GET /api/scanner`` ausgeliefert und dient als Übersicht der
-bekannten Geräte; eine Ansteuerung aus dem Hub gibt es nicht.
+Die Typen:
+
+``kamera``     Bilder kommen aus dem Browser.
+``netzwerk``   Der Hub scannt selbst über eSCL (siehe scanner_escl.py).
+``scan-app``   USB-Scanner, die der Hub nicht erreicht (er läuft im Container
+               ohne USB). Beim Scannen öffnet der Mac die App "Scan"; die
+               fertige Datei landet im Eingangskorb (siehe Skript 69).
+
+Diese Liste wird von ``GET /api/scanner`` ausgeliefert. Ansteuern lässt sich
+nur ``netzwerk``; ``scan-app`` ist ein Verweis auf den Weg über macOS.
 """
 
 import json
@@ -34,6 +40,9 @@ class ScanQuelle:
 
 # Registrierte Quelle "kamera": Bilder kommen aus dem Browser.
 KAMERA = ScanQuelle("kamera", "Handy-Kamera / Fotos", "kamera")
+
+# Typ eines Geräts, dessen Scan der Mac in der App "Scan" auslöst.
+TYP_SCAN_APP = "scan-app"
 
 DEFAULT_QUELLEN = [KAMERA]
 
@@ -70,3 +79,21 @@ def load_scanner():
     if not quellen:
         quellen = [ScanQuelle(q.id, q.name, q.typ) for q in DEFAULT_QUELLEN]
     return quellen
+
+
+def finde_scan_app(geraet_id=None):
+    """Liefert ein Gerät vom Typ ``scan-app`` oder None.
+
+    Solche Geräte kann der Hub nicht selbst ansteuern: Sie hängen per USB
+    oder über einen herstellereigenen Treiber am Mac, den der Container nicht
+    erreicht. Der Scan läuft deshalb in der macOS-App "Scan"
+    (Skript 69-archiv-hub-scansnap-helfer.command).
+
+    Ohne ``geraet_id`` kommt das erste Gerät dieses Typs zurück.
+    """
+    for quelle in load_scanner():
+        if quelle.typ != TYP_SCAN_APP:
+            continue
+        if geraet_id is None or quelle.id == geraet_id:
+            return quelle
+    return None

@@ -25,6 +25,10 @@ services:
       # verfügbar, deshalb die IP-Adresse. Leer = kein Direktscan.
       ARCHIV_HUB_SCANNER_URL: ${ARCHIV_HUB_SCANNER_URL:-}
       ARCHIV_HUB_SCANNER_NAME: ${ARCHIV_HUB_SCANNER_NAME:-}
+      # USB-ScanSnap: Der Container erreicht das Gerät nicht, deshalb öffnet
+      # ein Helfer auf dem Mac die App "Scan" (host.docker.internal).
+      # Leer = kein ScanSnap-Weg.
+      ARCHIV_HUB_SCAN_APP_URL: ${ARCHIV_HUB_SCAN_APP_URL:-}
     volumes:
       - ./data:/app/data
       # Speicherort "standard": HOST-Pfad (konfigurierbar) -> Container

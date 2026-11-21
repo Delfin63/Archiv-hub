@@ -576,7 +576,6 @@ def test_scanner_json_enthaelt_netzwerk_scanner():
 
     erwartet = {
         "canon-dx-6870i": "Canon Imagerunner Advanced DX 6870i",
-        "brother-mfc-j6920dw": "Brother MFC-J6920DW",
         "brother-mfc-l2980dw": "Brother MFC-L2980DW",
         "epson-xp-5200": "Epson XP-5200 Series",
     }
@@ -584,6 +583,38 @@ def test_scanner_json_enthaelt_netzwerk_scanner():
         assert sid in nach_id
         assert nach_id[sid].name == name
         assert nach_id[sid].typ == "netzwerk"
+
+
+def test_scanner_json_enthaelt_scan_app_geraete():
+    """ScanSnap und MFC-J6920DW laufen über die App "Scan" am Mac.
+
+    Der ScanSnap hängt per USB am Mac, der J6920DW spricht nur Brothers
+    eigenes Scan-Protokoll (kein eSCL). Der Hub im Container erreicht beide
+    nicht und öffnet deshalb die App "Scan" auf dem Mac.
+    """
+    import app.scanner as scanner
+
+    nach_id = {q.id: q for q in scanner.load_scanner()}
+
+    assert nach_id["scansnap-s1500"].typ == "scan-app"
+    assert nach_id["scansnap-s1500"].name == "Fujitsu ScanSnap S1500"
+    assert nach_id["brother-mfc-j6920dw"].typ == "scan-app"
+    assert nach_id["brother-mfc-j6920dw"].name == "Brother MFC-J6920DW"
+
+
+def test_finde_scan_app_waehlt_geraet_aus():
+    """finde_scan_app liefert das erste Gerät oder ein bestimmtes."""
+    import app.scanner as scanner
+
+    assert scanner.finde_scan_app("scansnap-s1500").name == "Fujitsu ScanSnap S1500"
+    assert (
+        scanner.finde_scan_app("brother-mfc-j6920dw").name == "Brother MFC-J6920DW"
+    )
+    # Ohne Kennung kommt das erste Gerät dieses Typs zurück.
+    assert scanner.finde_scan_app() is not None
+    # Ein Netzwerkgerät ist kein scan-app-Gerät.
+    assert scanner.finde_scan_app("brother-mfc-l2980dw") is None
+    assert scanner.finde_scan_app("gibt-es-nicht") is None
 
 
 def test_api_scanner_liefert_alle_quellen(tmp_path, monkeypatch):
@@ -1742,6 +1773,100 @@ def test_scanner_status_ohne_konfiguration(tmp_path, monkeypatch):
     r = client.get("/api/scanner/status").get_json()
     assert r["konfiguriert"] is False
     assert r["bereit"] is False
+
+
+def _scanner_json_mit_scan_app(data_dir):
+    """Legt ein scanner.json mit beiden App-Scan-Geräten im Testordner an."""
+    (data_dir / "scanner.json").write_text(
+        json.dumps(
+            [
+                {"id": "kamera", "name": "Handy-Kamera / Fotos", "typ": "kamera"},
+                {
+                    "id": "brother-mfc-l2980dw",
+                    "name": "Brother MFC-L2980DW",
+                    "typ": "netzwerk",
+                },
+                {
+                    "id": "brother-mfc-j6920dw",
+                    "name": "Brother MFC-J6920DW",
+                    "typ": "scan-app",
+                },
+                {
+                    "id": "scansnap-s1500",
+                    "name": "Fujitsu ScanSnap S1500",
+                    "typ": "scan-app",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_scan_app_ohne_helfer_adresse(tmp_path, monkeypatch):
+    """Ohne ARCHIV_HUB_SCAN_APP_URL meldet der Hub einen klaren Fehler."""
+    import app.app as appmod
+
+    client, data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    _scanner_json_mit_scan_app(data_dir)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "")
+    monkeypatch.setattr(appmod.config, "scan_app_url", lambda: "")
+    r = client.post(
+        "/api/scanner/scan-app", json={"geraet": "scansnap-s1500"}
+    )
+    assert r.status_code == 400
+    assert "nicht eingerichtet" in r.get_json()["error"]
+
+
+def test_scan_app_unbekanntes_geraet(tmp_path, monkeypatch):
+    """Ein Netzwerkgerät gehört nicht in den App-Scan-Weg."""
+    import app.app as appmod
+
+    client, data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    _scanner_json_mit_scan_app(data_dir)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "")
+    monkeypatch.setattr(
+        appmod.config, "scan_app_url", lambda: "http://helfer.test"
+    )
+    r = client.post(
+        "/api/scanner/scan-app", json={"geraet": "brother-mfc-l2980dw"}
+    )
+    assert r.status_code == 400
+
+
+def test_scan_app_ruft_helfer_mit_geraet(tmp_path, monkeypatch):
+    """Die Route reicht das gewählte Gerät an den Mac-Helfer durch."""
+    import app.app as appmod
+
+    client, data_dir, _korb = _korb_client(tmp_path, monkeypatch)
+    _scanner_json_mit_scan_app(data_dir)
+    monkeypatch.setattr(appmod.config, "scanner_url", lambda: "")
+    monkeypatch.setattr(
+        appmod.config, "scan_app_url", lambda: "http://helfer.test"
+    )
+
+    gerufen = {}
+
+    class _Antwort:
+        def read(self):
+            return b"ok"
+
+    def fake_urlopen(req, timeout=None):
+        gerufen["url"] = req.full_url
+        return _Antwort()
+
+    monkeypatch.setattr(appmod.urllib.request, "urlopen", fake_urlopen)
+
+    r = client.post("/api/scanner/scan-app", json={"geraet": "scansnap-s1500"})
+    assert r.status_code == 200
+    assert r.get_json()["geraet"] == "Fujitsu ScanSnap S1500"
+    assert gerufen["url"] == "http://helfer.test/scan"
+
+    # Auch das zweite Mac-Gerät geht denselben Weg.
+    r2 = client.post(
+        "/api/scanner/scan-app", json={"geraet": "brother-mfc-j6920dw"}
+    )
+    assert r2.status_code == 200
+    assert r2.get_json()["geraet"] == "Brother MFC-J6920DW"
 
 
 def test_scanner_scan_ohne_konfiguration(tmp_path, monkeypatch):

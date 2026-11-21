@@ -123,6 +123,18 @@ def scanner_name():
     return os.environ.get("ARCHIV_HUB_SCANNER_NAME") or "Scanner"
 
 
+def scan_app_url():
+    """Adresse des Mac-Helfers, der die App "Scan" öffnet.
+
+    Der Hub läuft im Container und erreicht den USB-ScanSnap nicht. Der
+    Helfer läuft auf dem Mac (Skript 69-archiv-hub-scansnap-helfer.command)
+    und ist über host.docker.internal erreichbar.
+
+    Leer = kein ScanSnap-Weg eingerichtet.
+    """
+    return os.environ.get("ARCHIV_HUB_SCAN_APP_URL") or ""
+
+
 # ---- Zeit -------------------------------------------------------------------
 #
 # Im Container läuft die Uhr in UTC. Für Dateinamen, Log-Einträge und
